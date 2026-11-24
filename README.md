@@ -8,6 +8,7 @@ Offline-first Android-приложение: фотографируешь цен�
 ## Документация
 
 - [AGENTS.md](AGENTS.md) — правила работы с репозиторием (обязательно прочитать агентам).
+- [docs/plan.md](docs/plan.md) — поэтапный план и регламент (ветки, ревью, лимит 5 итераций).
 - [docs/product.md](docs/product.md) — идея, скоуп прототипа, не-цели.
 - [docs/architecture.md](docs/architecture.md) — слои, потоки данных, решения по стеку.
 - [docs/structure.md](docs/structure.md) — дерево проекта и ориентир «куда класть код».
