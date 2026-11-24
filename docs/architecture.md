@@ -32,7 +32,7 @@
 
 - `camera/CameraController` — обёртка над CameraX: `bindToLifecycle`, `takePicture`,
   преобразование `ImageProxy` → `InputImage`, обязательный `imageProxy.close()`.
-- `ocr/MlKitTextRecognizer` — реализация `TextRecognizer` поверх ML Kit; возвращает纯化 текст.
+- `ocr/MlKitTextRecognizer` — реализация `TextRecognizer` поверх ML Kit; возвращает чистый текст.
 - `local/db/` — Room: `AppDatabase`, `ProductItemEntity`, `ComparisonSessionEntity`, DAO, converters.
 - `local/datastore/` — `SettingsDataStore` (например, последняя выбранная единица).
 - `repository/PriceTagRepositoryImpl` — маппинг entity ↔ domain, доступ к текущей сессии.

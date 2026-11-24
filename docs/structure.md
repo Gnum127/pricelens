@@ -45,6 +45,9 @@ pricelens/
 │       ├── test/                               # юнит-тесты: parser, calculator, usecases
 │       └── androidTest/                        # инструментальные тесты камеры/БД
 ├── docs/
+│   ├── agents/
+│   │   ├── code-review.md          # инструкция ревью кода сабагентом
+│   │   └── test-review.md          # инструкция ревью тестов сабагентом
 │   ├── product.md                  # идея, скоуп прототипа, не-цели
 │   ├── architecture.md             # слои, потоки, решения
 │   ├── structure.md                # этот файл

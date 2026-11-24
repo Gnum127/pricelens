@@ -12,6 +12,8 @@ Offline-first Android-приложение: фотографируешь цен�
 - [docs/architecture.md](docs/architecture.md) — слои, потоки данных, решения по стеку.
 - [docs/structure.md](docs/structure.md) — дерево проекта и ориентир «куда класть код».
 - [docs/ocr-notes.md](docs/ocr-notes.md) — форматы ценников и правила парсинга.
+- [docs/agents/code-review.md](docs/agents/code-review.md) — инструкция ревью кода сабагентом.
+- [docs/agents/test-review.md](docs/agents/test-review.md) — инструкция ревью тестов сабагентом.
 
 ## Статус
 
