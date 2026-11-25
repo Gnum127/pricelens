@@ -30,6 +30,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CancellationException
@@ -42,6 +44,7 @@ fun CapturePanel(
     cameraController: CameraController,
     permissionChecker: CameraPermissionChecker,
     isBusy: Boolean,
+    permissionDenied: Boolean,
     onCapture: () -> Unit,
     onDismiss: () -> Unit,
     onPermissionDenied: () -> Unit,
@@ -59,7 +62,9 @@ fun CapturePanel(
     }
 
     LaunchedEffect(Unit) {
-        if (!permissionGranted) requestPermission.launch(Manifest.permission.CAMERA)
+        if (!permissionGranted && !permissionDenied) {
+            requestPermission.launch(Manifest.permission.CAMERA)
+        }
     }
 
     if (permissionGranted) {
@@ -74,8 +79,18 @@ fun CapturePanel(
         }
     }
 
-    DisposableEffect(cameraController) {
-        onDispose { cameraController.unbind() }
+    DisposableEffect(cameraController, lifecycleOwner, permissionChecker) {
+        // После возврата из настроек разрешение могло быть выдано — перепроверяем его.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                permissionGranted = permissionChecker.isGranted()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            cameraController.unbind()
+        }
     }
 
     Column(
@@ -105,6 +120,13 @@ fun CapturePanel(
                         color = MaterialTheme.colorScheme.primary,
                         shape = MaterialTheme.shapes.small,
                     ),
+            )
+        }
+        if (permissionDenied && !permissionGranted) {
+            Text(
+                text = stringResource(R.string.error_permission),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
             )
         }
         Text(

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Версии зависимостей зафиксированы в gradle/libs.versions.toml и прошли
+         полный прогон assembleDebug/test/lint. Массовое обновление AGP, Compose,
+         CameraX и Room потребовало бы повторной проверки камеры и OCR на устройстве,
+         поэтому вынесено в отдельную задачу после передачи прототипа. -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+</lint>

@@ -13,6 +13,7 @@ pricelens/
 │   └── libs.versions.toml         # ВСЕ версии и алиасы зависимостей
 ├── app/
 │   ├── build.gradle.kts           # applicationId, namespace, dependencies
+│   ├── lint.xml                   # подавление информационных предупреждений о версиях
 │   └── src/
 │       ├── main/
 │       │   ├── AndroidManifest.xml
@@ -40,10 +41,12 @@ pricelens/
 │       │   │   │   └── capture/                # CameraScreen / CameraBottomSheet
 │       │   │   └── di/                         # Hilt-модули
 │       │   └── res/
+│       │       ├── drawable/                   # ic_launcher_foreground.xml
+│       │       ├── mipmap/                     # адаптивная иконка приложения (minSdk 26)
 │       │       ├── values/                     # strings.xml, colors.xml, themes.xml
-│       │       └── xml/                        # file_paths.xml (если нужен временный файл камеры)
+│       │       └── xml/                        # backup_rules.xml, data_extraction_rules.xml, file_paths.xml (при необходимости)
 │       ├── test/                               # юнит-тесты: parser, calculator, usecases
-│       └── androidTest/                        # инструментальные тесты камеры/БД
+│       └── androidTest/                        # инструментальные тесты камеры/БД и Compose UI-тесты
 ├── docs/
 │   ├── agents/
 │   │   ├── code-review.md          # инструкция ревью кода сабагентом
@@ -65,6 +68,7 @@ pricelens/
 | Новый экран/диалог | `ui/<feature>`; общие визуальные куски — `core/design` |
 | Новый источник данных | `data/local` или `data/ocr`, интерфейс — в `domain/repository` |
 | Новая зависимость | `gradle/libs.versions.toml`, затем `app/build.gradle.kts`, затем `docs/architecture.md` |
+| Минимальный Compose UI-тест критического пути | `src/androidTest/java/com/pricelens/ui/...` |
 | Новое разрешение | `AndroidManifest.xml` + обоснование в `docs/architecture.md` (помним про офлайн) |
 
 ## Правила зависимостей между папками

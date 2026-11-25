@@ -2,4 +2,5 @@
 <resources>
     <color name="price_lens_window_background">#FFF6F7F9</color>
     <color name="price_lens_primary">#FF2E7D6B</color>
+    <color name="price_lens_launcher_background">#FF2E7D6B</color>
 </resources>

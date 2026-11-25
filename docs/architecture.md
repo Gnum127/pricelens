@@ -93,6 +93,20 @@
 - `kotlinx-coroutines-test` (только в `testImplementation`) — детерминированный Main-диспетчер
   для юнит-тестов ViewModel с `viewModelScope`.
 - `hilt-navigation-compose` — `hiltViewModel()` в Composable без ручного создания фабрики ViewModel.
+- `ui-test-junit4` (только `androidTest`) и `ui-test-manifest` (только `debug`) — минимальные Compose
+  UI-тесты критического пути; версии берутся из того же Compose BOM, без новых literal-версий.
+
+### Офлайн и приватность на устройстве
+
+- `android:fullBackupContent` для Android 11 и ниже и `android:dataExtractionRules` с полным `exclude`
+  для `cloud-backup` и `device-transfer` на Android 12+: данные не должны покидать устройство ни через
+  облако, ни при переносе на другой телефон; `allowBackup="false"` оставлен для совместимости.
+- Проверка офлайна — ручная, на устройстве в режиме полёта (порядок в `README.md`): сеть не нужна ни
+  на старте, ни при распознавании, ни после перезапуска. `INTERNET` в манифесте нет, OCR bundled.
+- `app/lint.xml` выключает только два информационных предупреждения о наличии более новых версий
+  (`GradleDependency`, `AndroidGradlePluginVersion`). Версии в `libs.versions.toml` зафиксированы и
+  проходят полный прогон сборки; обновление AGP/Compose/CameraX/Room — отдельная задача с повторной
+  проверкой камеры и OCR, а не часть QA-полировки прототипа.
 
 Отклонённые варианты: Tesseract/tess-two (тяжелее и слабее на мелком тексте), Firebase/облачный OCR
 (нарушает офлайн), Java + XML (медленнее разрабатывать), Koin (для прототипа достаточно Hilt,

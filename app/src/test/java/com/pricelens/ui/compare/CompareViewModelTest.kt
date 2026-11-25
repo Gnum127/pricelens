@@ -14,6 +14,7 @@ import com.pricelens.domain.usecase.CompareItemsUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -383,13 +384,96 @@ class CompareViewModelTest {
     }
 
     @Test
-    fun permissionDeniedActionEmitsMessageWithoutCapture() {
+    fun permissionDeniedActionKeepsCaptureOpenAndSetsFlag() {
         val viewModel = viewModel()
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        assertThat(viewModel.uiState.value.isBusy).isTrue()
 
-        val event = expectMessage(viewModel) { viewModel.onAction(UiAction.PermissionDenied) }
+        val messages = messagesDuring(viewModel) {
+            viewModel.onAction(UiAction.PermissionDenied)
+        }
 
-        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.PermissionDenied))
+        assertThat(messages.map { it.message })
+            .containsExactly(CompareMessage.PermissionDenied)
+        assertThat(viewModel.uiState.value.isCaptureOpen).isTrue()
+        assertThat(viewModel.uiState.value.isPermissionDenied).isTrue()
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
+        assertThat(viewModel.uiState.value.items).isEmpty()
         assertThat(provider.readCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun permissionDeniedDuringInFlightOcrCancelsCapture() {
+        val gated = GatedImageTextProvider()
+        val viewModel = viewModel(imageTextProvider = gated)
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        assertThat(gated.readCalls).isEqualTo(1)
+
+        val messages = messagesDuring(viewModel) {
+            viewModel.onAction(UiAction.PermissionDenied)
+            gated.gates[0].complete(Unit)
+        }
+
+        assertThat(messages.map { it.message })
+            .containsExactly(CompareMessage.PermissionDenied)
+        assertThat(viewModel.uiState.value.items).isEmpty()
+        assertThat(viewModel.uiState.value.isCaptureOpen).isTrue()
+        assertThat(viewModel.uiState.value.isPermissionDenied).isTrue()
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
+        assertThat(gated.readCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun deniedCaptureDoesNotResetBusyOfNewCapture() {
+        val gated = GatedImageTextProvider()
+        val viewModel = viewModel(imageTextProvider = gated)
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        viewModel.onAction(UiAction.PermissionDenied)
+
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        assertThat(viewModel.uiState.value.isBusy).isTrue()
+        assertThat(gated.readCalls).isEqualTo(2)
+
+        gated.gates[0].complete(Unit)
+        advance()
+        assertThat(viewModel.uiState.value.isBusy).isTrue()
+        assertThat(viewModel.uiState.value.items).isEmpty()
+
+        gated.gates[1].complete(Unit)
+        advance()
+        assertThat(viewModel.uiState.value.items).hasSize(1)
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
+    }
+
+    @Test
+    fun dismissingCaptureClearsPermissionDeniedFlag() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.PermissionDenied)
+
+        viewModel.onAction(UiAction.CaptureDismissed)
+
+        assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+        assertThat(viewModel.uiState.value.isPermissionDenied).isFalse()
+    }
+
+    @Test
+    fun openingCaptureClearsPermissionDeniedFlag() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.PermissionDenied)
+
+        viewModel.onAction(UiAction.AddClicked)
+
+        assertThat(viewModel.uiState.value.isCaptureOpen).isTrue()
+        assertThat(viewModel.uiState.value.isPermissionDenied).isFalse()
     }
 
     @Test
@@ -612,10 +696,17 @@ class CompareViewModelTest {
         messages.toList()
     }
 
-    private fun viewModel(completeLoad: Boolean = true): CompareViewModel {
+    private fun viewModel(
+        completeLoad: Boolean = true,
+        imageTextProvider: ImageTextProvider = provider,
+    ): CompareViewModel {
         val calculator = UnitPriceCalculator()
         return CompareViewModel(
-            recognizePriceTag = RecognizePriceTagUseCase(provider, PriceTagParser(), calculator),
+            recognizePriceTag = RecognizePriceTagUseCase(
+                imageTextProvider,
+                PriceTagParser(),
+                calculator,
+            ),
             addItem = AddItemUseCase(),
             removeItemUseCase = RemoveItemUseCase(),
             compareItems = CompareItemsUseCase(),
@@ -658,6 +749,21 @@ class CompareViewModelTest {
         override suspend fun loadCurrent(): List<ProductItem> {
             loadError?.let { throw it }
             return items
+        }
+    }
+
+    private class GatedImageTextProvider : ImageTextProvider {
+        val gates = mutableListOf<CompletableDeferred<Unit>>()
+        var result: RawTextResult = RawTextResult.Success("350 г 240 ₽")
+        var readCalls: Int = 0
+            private set
+
+        override suspend fun readText(): RawTextResult {
+            readCalls++
+            val gate = CompletableDeferred<Unit>()
+            gates.add(gate)
+            gate.await()
+            return result
         }
     }
 

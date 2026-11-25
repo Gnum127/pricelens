@@ -13,6 +13,7 @@ data class CompareUiState(
     val drafts: Map<String, ItemDraft> = emptyMap(),
     val cheapestId: String? = null,
     val isCaptureOpen: Boolean = false,
+    val isPermissionDenied: Boolean = false,
     val isBusy: Boolean = false,
     val isLoading: Boolean = true,
     val isPersistenceAvailable: Boolean = true,

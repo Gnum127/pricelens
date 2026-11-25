@@ -25,7 +25,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.util.UUID
@@ -49,6 +51,7 @@ class CompareViewModel @Inject constructor(
     private val invalidFields = mutableSetOf<String>()
     private var isLoaded = false
     private var canPersist = false
+    private var captureJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -95,11 +98,22 @@ class CompareViewModel @Inject constructor(
     fun onAction(action: UiAction) {
         if (!isLoaded) return
         when (action) {
-            UiAction.AddClicked -> _uiState.update { it.copy(isCaptureOpen = true) }
-            UiAction.CaptureDismissed -> _uiState.update { it.copy(isCaptureOpen = false) }
+            UiAction.AddClicked -> _uiState.update {
+                it.copy(isCaptureOpen = true, isPermissionDenied = false)
+            }
+            UiAction.CaptureDismissed -> _uiState.update {
+                it.copy(isCaptureOpen = false, isPermissionDenied = false)
+            }
             UiAction.CameraBindFailed -> failCapture(CompareMessage.CameraError)
             UiAction.CaptureConfirmed -> capture()
-            UiAction.PermissionDenied -> failCapture(CompareMessage.PermissionDenied)
+            UiAction.PermissionDenied -> {
+                // Отказ во время захвата отменяет его: результат больше не должен попасть в список.
+                captureJob?.cancel()
+                captureJob = null
+                // Диалог остаётся открытым: пользователь видит подсказку про настройки.
+                send(CompareMessage.PermissionDenied)
+                _uiState.update { it.copy(isPermissionDenied = true, isBusy = false) }
+            }
             is UiAction.NameChanged -> changeName(action.id, action.value)
             is UiAction.AmountChanged -> changeNumber(action.id, action.value, isAmount = true)
             is UiAction.PriceChanged -> changeNumber(action.id, action.value, isAmount = false)
@@ -110,32 +124,42 @@ class CompareViewModel @Inject constructor(
     private fun capture() {
         if (_uiState.value.isBusy) return
         _uiState.update { it.copy(isBusy = true) }
-        viewModelScope.launch {
-            when (val result = recognizePriceTag()) {
-                is OcrResult.Success -> {
-                    val item = result.toItem(UUID.randomUUID().toString())
-                    val updated = addItem(_uiState.value.items, item)
-                    if (updated == null) {
-                        failCapture(CompareMessage.LimitReached)
-                    } else {
-                        _uiState.update { state ->
-                            state.copy(
-                                items = updated,
-                                drafts = state.drafts + (item.id to item.toDraft()),
-                                cheapestId = compareItems(updated).cheapestId,
-                                isCaptureOpen = false,
-                            )
+        val job = viewModelScope.launch {
+            try {
+                val result = recognizePriceTag()
+                // Отказ мог прийти, пока OCR висел: отменённый результат нельзя применять.
+                if (!isActive) return@launch
+                when (result) {
+                    is OcrResult.Success -> {
+                        val item = result.toItem(UUID.randomUUID().toString())
+                        val updated = addItem(_uiState.value.items, item)
+                        if (updated == null) {
+                            failCapture(CompareMessage.LimitReached)
+                        } else {
+                            _uiState.update { state ->
+                                state.copy(
+                                    items = updated,
+                                    drafts = state.drafts + (item.id to item.toDraft()),
+                                    cheapestId = compareItems(updated).cheapestId,
+                                    isCaptureOpen = false,
+                                )
+                            }
                         }
                     }
-                }
 
-                OcrResult.EmptyText -> failCapture(CompareMessage.EmptyText)
-                is OcrResult.Unparseable -> failCapture(CompareMessage.Unparseable(result.rawText))
-                OcrResult.CameraError -> failCapture(CompareMessage.CameraError)
-                OcrResult.PermissionDenied -> failCapture(CompareMessage.PermissionDenied)
+                    OcrResult.EmptyText -> failCapture(CompareMessage.EmptyText)
+                    is OcrResult.Unparseable -> {
+                        failCapture(CompareMessage.Unparseable(result.rawText))
+                    }
+                    OcrResult.CameraError -> failCapture(CompareMessage.CameraError)
+                    OcrResult.PermissionDenied -> failCapture(CompareMessage.PermissionDenied)
+                }
+            } finally {
+                // Отменённый захват не сбрасывает isBusy у нового захвата.
+                if (isActive) _uiState.update { it.copy(isBusy = false) }
             }
-            _uiState.update { it.copy(isBusy = false) }
         }
+        captureJob = job
     }
 
     private fun failCapture(message: CompareMessage) {

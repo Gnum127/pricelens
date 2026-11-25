@@ -122,6 +122,7 @@ fun CompareScreen(
                     cameraController = cameraController,
                     permissionChecker = permissionChecker,
                     isBusy = state.isBusy,
+                    permissionDenied = state.isPermissionDenied,
                     onCapture = { onAction(UiAction.CaptureConfirmed) },
                     onDismiss = { onAction(UiAction.CaptureDismissed) },
                     onPermissionDenied = { onAction(UiAction.PermissionDenied) },
