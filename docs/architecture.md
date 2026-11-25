@@ -81,8 +81,13 @@
 - ML Kit on-device — офлайн и достаточно хорош для печатного текста ценников.
 - Room — локальное хранение и лёгкий путь к истории сравнений позже.
 - Hilt — предсказуемое графовое DI, просто подставлять фейки в тестах.
-- Coroutines — `suspend`-интерфейс `ImageTextProvider`; в юнит-тестах use-case достаточно
-  `runBlocking` из `kotlinx-coroutines-core` (версия зафиксирована в version catalog).
+- Coroutines — `suspend`-интерфейс `ImageTextProvider`; `runBlocking` нужен и в проде для CameraX/ML Kit,
+  и в юнит-тестах use-case. Версия зафиксирована в version catalog.
+- CameraX и ML Kit text-recognition (bundled) — единственный путь от кадра к тексту без сети
+  и без dynamic download через Play Services.
+- Room и DataStore — локальное хранение текущей выборки и настроек; Room-сущности связаны
+  с сессией, чтобы история сравнений не требовала миграции.
+- Hilt + KSP — DI для подстановки фейков в тестах; KSP используется и Hilt, и Room, чтобы не тянуть kapt.
 
 Отклонённые варианты: Tesseract/tess-two (тяжелее и слабее на мелком тексте), Firebase/облачный OCR
 (нарушает офлайн), Java + XML (медленнее разрабатывать), Koin (для прототипа достаточно Hilt,
