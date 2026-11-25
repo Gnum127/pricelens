@@ -45,13 +45,14 @@ pricelens/
 │       │       ├── mipmap/                     # адаптивная иконка приложения (minSdk 26)
 │       │       ├── values/                     # strings.xml, colors.xml, themes.xml
 │       │       └── xml/                        # backup_rules.xml, data_extraction_rules.xml, file_paths.xml (при необходимости)
-│       ├── test/                               # юнит-тесты: parser, calculator, usecases
+│       ├── test/                               # юнит-тесты: parser, calculator, usecases, проверка манифеста
 │       └── androidTest/                        # инструментальные тесты камеры/БД и Compose UI-тесты
 ├── docs/
 │   ├── agents/
 │   │   ├── code-review.md          # инструкция ревью кода сабагентом
 │   │   └── test-review.md          # инструкция ревью тестов сабагентом
 │   ├── plan.md                     # план этапов, регламент и зафиксированные решения
+│   ├── release.md                  # отчёт о передаче прототипа prototype-v1
 │   ├── handoff.md                  # краткий бриф для передачи в новую сессию
 │   ├── product.md                  # идея, скоуп прототипа, не-цели
 │   ├── architecture.md             # слои, потоки, решения

@@ -49,6 +49,10 @@ kotlin {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Тест манифеста проверяет результат слияния, поэтому манифесты должны быть собраны.
+    dependsOn("processDebugManifestForPackage", "processReleaseManifestForPackage")
+    // Тест манифеста не должен зависеть от текущей директории запуска Gradle/IDE.
+    systemProperty("app.projectDir", projectDir.absolutePath)
 }
 
 dependencies {
