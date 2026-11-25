@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PriceLens</string>
+    <string name="empty_screen_message">Экран сравнения цен появится здесь</string>
+</resources>

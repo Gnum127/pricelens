@@ -6,3 +6,22 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+build/
+local.properties
+
+# Android build artifacts
+.cxx/
+.externalNativeBuild/
+captures/
+output-metadata.json
+*.apk
+*.ap_
+*.aab
+
+# Signing
+*.jks
+*.keystore
