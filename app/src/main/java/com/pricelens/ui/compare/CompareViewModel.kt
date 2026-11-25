@@ -10,17 +10,21 @@ import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.domain.pricing.UnitPriceCalculator
+import com.pricelens.domain.repository.PriceTagRepository
 import com.pricelens.domain.usecase.AddItemUseCase
 import com.pricelens.domain.usecase.CompareItemsUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
@@ -34,6 +38,7 @@ class CompareViewModel @Inject constructor(
     private val removeItemUseCase: RemoveItemUseCase,
     private val compareItems: CompareItemsUseCase,
     private val calculator: UnitPriceCalculator,
+    private val repository: PriceTagRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(CompareUiState())
     val uiState: StateFlow<CompareUiState> = _uiState.asStateFlow()
@@ -42,8 +47,53 @@ class CompareViewModel @Inject constructor(
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
 
     private val invalidFields = mutableSetOf<String>()
+    private var isLoaded = false
+    private var canPersist = false
+
+    init {
+        viewModelScope.launch {
+            val saved = try {
+                repository.loadCurrent().also { canPersist = true }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                send(CompareMessage.StorageError)
+                _uiState.update { it.copy(isPersistenceAvailable = false) }
+                emptyList()
+            }
+            _uiState.update { state ->
+                state.copy(
+                    items = saved,
+                    drafts = saved.associate { it.id to it.toDraft() },
+                    cheapestId = compareItems(saved).cheapestId,
+                    isLoading = false,
+                )
+            }
+            isLoaded = true
+            observeSaves(saved)
+        }
+    }
+
+    private suspend fun observeSaves(initial: List<ProductItem>) {
+        var lastSaved = initial
+        _uiState
+            .map { it.items }
+            .distinctUntilChanged()
+            .collect { items ->
+                if (items == lastSaved || !canPersist) return@collect
+                try {
+                    repository.saveCurrent(items)
+                    lastSaved = items
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    send(CompareMessage.StorageError)
+                }
+            }
+    }
 
     fun onAction(action: UiAction) {
+        if (!isLoaded) return
         when (action) {
             UiAction.AddClicked -> _uiState.update { it.copy(isCaptureOpen = true) }
             UiAction.CaptureDismissed -> _uiState.update { it.copy(isCaptureOpen = false) }

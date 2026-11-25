@@ -14,6 +14,8 @@ data class CompareUiState(
     val cheapestId: String? = null,
     val isCaptureOpen: Boolean = false,
     val isBusy: Boolean = false,
+    val isLoading: Boolean = true,
+    val isPersistenceAvailable: Boolean = true,
 )
 
 sealed interface CompareMessage {
@@ -22,6 +24,7 @@ sealed interface CompareMessage {
     data object CameraError : CompareMessage
     data object PermissionDenied : CompareMessage
     data object LimitReached : CompareMessage
+    data object StorageError : CompareMessage
     data object InvalidInput : CompareMessage
 }
 

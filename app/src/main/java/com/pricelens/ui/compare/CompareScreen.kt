@@ -79,14 +79,35 @@ fun CompareScreen(
                     onRemove = { onAction(UiAction.ItemRemoved(item.id)) },
                 )
             }
+            if (state.isLoading) {
+                item {
+                    Text(
+                        text = stringResource(R.string.loading),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             item {
                 AddTile(
-                    enabled = state.items.size < AddItemUseCase.MAX_ITEMS && !state.isBusy,
+                    enabled = !state.isLoading &&
+                        state.items.size < AddItemUseCase.MAX_ITEMS && !state.isBusy,
                     onClick = { onAction(UiAction.AddClicked) },
                 )
             }
-            item {
-                ComparisonSummary(best = best, itemCount = state.items.size)
+            if (!state.isLoading && !state.isPersistenceAvailable) {
+                item {
+                    Text(
+                        text = stringResource(R.string.error_storage),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            if (!state.isLoading) {
+                item {
+                    ComparisonSummary(best = best, itemCount = state.items.size)
+                }
             }
         }
     }

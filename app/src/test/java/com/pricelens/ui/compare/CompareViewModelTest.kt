@@ -1,16 +1,19 @@
 package com.pricelens.ui.compare
 
 import com.google.common.truth.Truth.assertThat
+import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.RawTextResult
 import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.domain.parser.PriceTagParser
 import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.ImageTextProvider
+import com.pricelens.domain.repository.PriceTagRepository
 import com.pricelens.domain.usecase.AddItemUseCase
 import com.pricelens.domain.usecase.CompareItemsUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -32,6 +35,7 @@ private const val MESSAGE_TIMEOUT_MS = 1_000L
 
 class CompareViewModelTest {
     private val provider = FakeImageTextProvider()
+    private val repository = FakePriceTagRepository()
     private val dispatcher = StandardTestDispatcher()
 
     @BeforeEach
@@ -401,10 +405,177 @@ class CompareViewModelTest {
         assertThat(provider.readCalls).isEqualTo(1)
     }
 
-    private fun addItem(viewModel: CompareViewModel, text: String) {
+    @Test
+    fun loadsSavedSelectionOnStart() {
+        repository.items = listOf(
+            product("a", "Творог", "350", "240", "685.71"),
+            product("b", "Творог 5%", "320", "212", "662.50"),
+        )
+        val viewModel = viewModel()
+
+        val state = viewModel.uiState.value
+        assertThat(state.isLoading).isFalse()
+        assertThat(state.isPersistenceAvailable).isTrue()
+        assertThat(state.items).isEqualTo(repository.items)
+        assertThat(state.cheapestId).isEqualTo("b")
+        assertThat(state.drafts["a"]?.amount).isEqualTo("350")
+        assertThat(state.drafts["b"]?.price).isEqualTo("212,00")
+    }
+
+    @Test
+    fun savedSelectionIsNotOverwrittenOnStartup() {
+        val saved = listOf(product("a", "Творог", "350", "240", "685.71"))
+        repository.items = saved
+
+        viewModel()
+
+        assertThat(repository.items).isEqualTo(saved)
+        assertThat(repository.saveCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun actionsBeforeLoadCompletesAreIgnored() {
+        val saved = listOf(product("a", "Творог", "350", "240", "685.71"))
+        repository.items = saved
+        val viewModel = viewModel(completeLoad = false)
+        assertThat(viewModel.uiState.value.isLoading).isTrue()
+
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        viewModel.onAction(UiAction.NameChanged("a", "Перезаписано"))
+        advance()
+
+        assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+        assertThat(viewModel.uiState.value.items).isEqualTo(saved)
+        assertThat(repository.items).isEqualTo(saved)
+        assertThat(repository.saveCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun loadFailureIsReportedAndSelectionStartsEmpty() {
+        repository.loadError = IllegalStateException("load failed")
+        val viewModel = viewModel(completeLoad = false)
+
+        val event = expectMessage(viewModel) { advance() }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.StorageError))
+        assertThat(viewModel.uiState.value.isPersistenceAvailable).isFalse()
+        assertThat(viewModel.uiState.value.items).isEmpty()
+    }
+
+    @Test
+    fun loadFailureDisablesPersistenceToKeepExistingData() {
+        val saved = listOf(product("a", "Творог", "350", "240", "685.71"))
+        repository.items = saved
+        repository.loadError = IllegalStateException("load failed")
+        val viewModel = viewModel(completeLoad = false)
+
+        val event = expectMessage(viewModel) { advance() }
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.StorageError))
+        assertThat(viewModel.uiState.value.items).hasSize(1)
+        assertThat(repository.items).isEqualTo(saved)
+        assertThat(repository.saveCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun cancelledLoadEmitsNoEventAndKeepsLoadingState() {
+        repository.loadError = CancellationException()
+        val viewModel = viewModel(completeLoad = false)
+
+        val messages = messagesDuring(viewModel) { advance() }
+
+        assertThat(messages).isEmpty()
+        assertThat(viewModel.uiState.value.isLoading).isTrue()
+        assertThat(viewModel.uiState.value.items).isEmpty()
+    }
+
+    @Test
+    fun cancelledSaveEmitsNoEventAndDoesNotPersist() {
+        val viewModel = viewModel()
+        repository.saveError = CancellationException()
+        repository.failNextSaves = 1
+
+        val messages = messagesDuring(viewModel) { addItem(viewModel, "350 г 240 ₽") }
+
+        assertThat(messages).isEmpty()
+        assertThat(repository.items).isEmpty()
+        assertThat(viewModel.uiState.value.items).hasSize(1)
+    }
+
+    @Test
+    fun saveFailureIsReportedAndLaterSavesStillWork() {
+        val viewModel = viewModel()
+        repository.failNextSaves = 1
+
+        val addEvent = expectMessage(viewModel) { addItem(viewModel, "350 г 240 ₽") }
+        assertThat(addEvent).isEqualTo(UiEvent.Message(CompareMessage.StorageError))
+        assertThat(repository.items).isEmpty()
+        assertThat(repository.saveCalls).isEqualTo(0)
+
+        val id = viewModel.uiState.value.items.single().id
+        viewModel.onAction(UiAction.NameChanged(id, "Творог 5%"))
+        advance()
+
+        assertThat(repository.saveCalls).isEqualTo(1)
+        assertThat(repository.items.single().name).isEqualTo("Творог 5%")
+    }
+
+    @Test
+    fun savesSelectionAfterAddEditAndRemove() {
+        val viewModel = viewModel()
+
+        addItem(viewModel, "350 г 240 ₽")
+        assertThat(repository.items).isEqualTo(viewModel.uiState.value.items)
+
+        val id = viewModel.uiState.value.items.single().id
+        viewModel.onAction(UiAction.NameChanged(id, "Творог 5%"))
+        viewModel.onAction(UiAction.AmountChanged(id, "700"))
+        advance()
+        assertThat(repository.items.single().name).isEqualTo("Творог 5%")
+        assertThat(
+            repository.items.single().unitPrice.value.compareTo(BigDecimal("342.86")),
+        ).isEqualTo(0)
+
+        viewModel.onAction(UiAction.ItemRemoved(id))
+        advance()
+        assertThat(repository.items).isEmpty()
+        assertThat(repository.saveCalls).isEqualTo(3)
+    }
+
+    @Test
+    fun fullScenarioSurvivesRestart() {
+        val first = viewModel()
+        val added = listOf(
+            "350 г 240 ₽",
+            "320 г 212 ₽",
+            "500 г 350 ₽",
+            "400 г 260 ₽",
+            "250 г 180 ₽",
+        ).map { addItem(first, it) }
+        val before = first.uiState.value
+        val expectedBestId = added[3].id
+        assertThat(before.items).hasSize(5)
+        assertThat(before.cheapestId).isEqualTo(expectedBestId)
+        assertThat(before.items.first { it.id == expectedBestId }
+            .unitPrice.value.compareTo(BigDecimal("650.00"))).isEqualTo(0)
+        assertThat(repository.items).isEqualTo(before.items)
+
+        val second = viewModel()
+
+        val after = second.uiState.value
+        assertThat(after.items).isEqualTo(before.items)
+        assertThat(after.cheapestId).isEqualTo(before.cheapestId)
+        assertThat(after.drafts).isEqualTo(before.drafts)
+    }
+
+    private fun addItem(viewModel: CompareViewModel, text: String): ProductItem {
         provider.result = RawTextResult.Success(text)
         viewModel.onAction(UiAction.CaptureConfirmed)
         advance()
+        return viewModel.uiState.value.items.last()
     }
 
     private fun advance() {
@@ -441,7 +612,7 @@ class CompareViewModelTest {
         messages.toList()
     }
 
-    private fun viewModel(): CompareViewModel {
+    private fun viewModel(completeLoad: Boolean = true): CompareViewModel {
         val calculator = UnitPriceCalculator()
         return CompareViewModel(
             recognizePriceTag = RecognizePriceTagUseCase(provider, PriceTagParser(), calculator),
@@ -449,7 +620,45 @@ class CompareViewModelTest {
             removeItemUseCase = RemoveItemUseCase(),
             compareItems = CompareItemsUseCase(),
             calculator = calculator,
-        )
+            repository = repository,
+        ).also { if (completeLoad) advance() }
+    }
+
+    private fun product(
+        id: String,
+        name: String,
+        grams: String,
+        price: String,
+        perKg: String,
+    ) = ProductItem(
+        id = id,
+        name = name,
+        packageAmount = BigDecimal(grams),
+        packageUnit = WeightUnit.GRAM,
+        price = BigDecimal(price),
+        unitPrice = UnitPrice(BigDecimal(perKg), UnitPrice.Unit.KILOGRAM),
+    )
+
+    private class FakePriceTagRepository : PriceTagRepository {
+        var items: List<ProductItem> = emptyList()
+        var saveCalls: Int = 0
+        var loadError: Throwable? = null
+        var saveError: Throwable = IllegalStateException("save failed")
+        var failNextSaves: Int = 0
+
+        override suspend fun saveCurrent(items: List<ProductItem>) {
+            if (failNextSaves > 0) {
+                failNextSaves--
+                throw saveError
+            }
+            this.items = items
+            saveCalls++
+        }
+
+        override suspend fun loadCurrent(): List<ProductItem> {
+            loadError?.let { throw it }
+            return items
+        }
     }
 
     private class FakeImageTextProvider : ImageTextProvider {

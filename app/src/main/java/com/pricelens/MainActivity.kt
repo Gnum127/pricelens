@@ -67,4 +67,5 @@ private fun Context.messageFor(message: CompareMessage): String = when (message)
     CompareMessage.PermissionDenied -> getString(R.string.error_permission)
     CompareMessage.LimitReached -> getString(R.string.error_limit)
     CompareMessage.InvalidInput -> getString(R.string.error_invalid_input)
+    CompareMessage.StorageError -> getString(R.string.error_storage)
 }
