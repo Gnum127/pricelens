@@ -88,6 +88,11 @@
 - Room и DataStore — локальное хранение текущей выборки и настроек; Room-сущности связаны
   с сессией, чтобы история сравнений не требовала миграции.
 - Hilt + KSP — DI для подстановки фейков в тестах; KSP используется и Hilt, и Room, чтобы не тянуть kapt.
+- `lifecycle-viewmodel-ktx` и `lifecycle-runtime-compose` — `viewModelScope` для распознавания и
+  `collectAsStateWithLifecycle` для безопасного сбора потоков ViewModel в Compose.
+- `kotlinx-coroutines-test` (только в `testImplementation`) — детерминированный Main-диспетчер
+  для юнит-тестов ViewModel с `viewModelScope`.
+- `hilt-navigation-compose` — `hiltViewModel()` в Composable без ручного создания фабрики ViewModel.
 
 Отклонённые варианты: Tesseract/tess-two (тяжелее и слабее на мелком тексте), Firebase/облачный OCR
 (нарушает офлайн), Java + XML (медленнее разрабатывать), Koin (для прототипа достаточно Hilt,

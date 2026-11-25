@@ -71,7 +71,8 @@ pricelens/
 
 - `domain` не импортирует `android.*`, `androidx.*`, `com.google.mlkit.*`.
 - `data` может импортировать `domain`, но не `ui`.
-- `ui` может импортировать `domain` и `core/design`, но не напрямую `data` (кроме DI-провайдеров в `MainActivity`).
+- `ui` может импортировать `domain` и `core/design`, но не напрямую `data` (кроме контрактов камеры
+  `data/camera`, которые внедряются через DI в `MainActivity` и передаются в экран).
 - `core/design` не знает про use case-ы и БД.
 
 ## Именование пакетов
