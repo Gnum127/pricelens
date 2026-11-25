@@ -16,9 +16,11 @@
 ### domain (чистый Kotlin)
 
 - `model/`
-  - `ProductItem(id, name, packageAmount, packageUnit, price, unitPrice, sourceText?)`.
-    `packageAmount` хранится как `BigDecimal`/`Double` в базовых единицах (г или мл),
-    `unit` — `GRAM | MILLILITER`. Цена — `BigDecimal` рублей.
+  - `ProductItem(id, name, packageAmount?, packageUnit?, price?, unitPrice, sourceText?)`.
+    Поля количества и цены упаковки nullable только для ценника с явной строкой
+    «цена за 1 кг/1 л»: такие поля пользователь заполняет вручную до сравнения.
+    Для обычного ценника они не-null. `packageAmount` хранится как `BigDecimal`
+    в базовых единицах (г или мл), `unit` — `GRAM | MILLILITER`. Цена — `BigDecimal` рублей.
   - `UnitPrice(valuePerKgOrL: BigDecimal, displayUnit: KILOGRAM | LITER)`.
 - `parser/PriceTagParser` — из сырого текста ML Kit возвращает `ParsedPriceTag?`:
   цена, количество, единица, опционально название. Никаких Android-типов.
@@ -79,6 +81,8 @@
 - ML Kit on-device — офлайн и достаточно хорош для печатного текста ценников.
 - Room — локальное хранение и лёгкий путь к истории сравнений позже.
 - Hilt — предсказуемое графовое DI, просто подставлять фейки в тестах.
+- Coroutines — `suspend`-интерфейс `ImageTextProvider`; в юнит-тестах use-case достаточно
+  `runBlocking` из `kotlinx-coroutines-core` (версия зафиксирована в version catalog).
 
 Отклонённые варианты: Tesseract/tess-two (тяжелее и слабее на мелком тексте), Firebase/облачный OCR
 (нарушает офлайн), Java + XML (медленнее разрабатывать), Koin (для прототипа достаточно Hilt,

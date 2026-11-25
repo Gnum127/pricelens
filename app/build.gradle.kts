@@ -44,6 +44,10 @@ kotlin {
     }
 }
 
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -52,4 +56,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.core)
 }
