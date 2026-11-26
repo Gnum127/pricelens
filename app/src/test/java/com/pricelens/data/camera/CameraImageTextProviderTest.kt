@@ -4,8 +4,11 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.lifecycle.LifecycleOwner
 import com.google.common.truth.Truth.assertThat
+import com.pricelens.data.ocr.OcrEngineUnavailableException
 import com.pricelens.data.ocr.TextRecognizer
+import com.pricelens.domain.model.OcrFrame
 import com.pricelens.domain.model.RawTextResult
+import com.pricelens.testing.singleLineFrame
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -38,30 +41,39 @@ class CameraImageTextProviderTest {
     }
 
     @Test
-    fun nullTextBecomesEmptyTextAndClosesImage() = runBlocking {
+    fun nullFrameBecomesEmptyTextAndClosesImage() = runBlocking {
         camera.image = image.proxy
-        ocr.text = null
+        ocr.frame = null
 
         assertThat(provider.readText()).isEqualTo(RawTextResult.EmptyText)
         assertThat(image.closeCount).isEqualTo(1)
     }
 
     @Test
-    fun blankTextBecomesEmptyTextAndClosesImage() = runBlocking {
+    fun frameWithoutTokensBecomesEmptyTextAndClosesImage() = runBlocking {
         camera.image = image.proxy
-        ocr.text = "   \n\t"
+        ocr.frame = singleLineFrame("350 г 240 ₽").copy(tokens = emptyList())
 
         assertThat(provider.readText()).isEqualTo(RawTextResult.EmptyText)
         assertThat(image.closeCount).isEqualTo(1)
     }
 
     @Test
-    fun recognizedTextBecomesSuccessAndClosesImage() = runBlocking {
+    fun recognizedFrameBecomesSuccessAndClosesImage() = runBlocking {
         camera.image = image.proxy
-        ocr.text = "350 г 240 ₽"
+        ocr.frame = singleLineFrame("350 г 240 ₽")
 
-        assertThat(provider.readText()).isEqualTo(RawTextResult.Success("350 г 240 ₽"))
+        assertThat(provider.readText()).isEqualTo(RawTextResult.Success(ocr.frame!!))
         assertThat(ocr.lastImage).isEqualTo(image.proxy)
+        assertThat(image.closeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun unavailableOcrEngineBecomesErrorAndClosesImage() = runBlocking {
+        camera.image = image.proxy
+        ocr.failure = OcrEngineUnavailableException("model missing")
+
+        assertThat(provider.readText()).isEqualTo(RawTextResult.OcrEngineError)
         assertThat(image.closeCount).isEqualTo(1)
     }
 
@@ -98,14 +110,14 @@ class CameraImageTextProviderTest {
     }
 
     private class FakeTextRecognizer : TextRecognizer {
-        var text: String? = null
+        var frame: OcrFrame? = null
         var failure: Throwable? = null
         var lastImage: ImageProxy? = null
 
-        override fun recognize(image: ImageProxy): String? {
+        override fun recognize(image: ImageProxy): OcrFrame? {
             lastImage = image
             failure?.let { throw it }
-            return text
+            return frame
         }
     }
 

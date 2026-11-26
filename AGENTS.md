@@ -30,7 +30,7 @@ Offline-first приложение для Android: пользователь фо
 | Язык | Kotlin |
 | UI | Jetpack Compose + Material 3 |
 | Камера | CameraX (`Preview` + `ImageCapture`) |
-| OCR | ML Kit Text Recognition v2, **on-device bundled** (`com.google.mlkit:text-recognition`) |
+| OCR | Два on-device движка: Tesseract4Android `rus` (слова/вес/копейки) + RapidOCR AAR (рубли); модели bundled, без сети |
 | Фон | Coroutines + Flow, `viewModelScope` |
 | DI | Hilt |
 | БД | Room (+ Converter для decimal/unit) |
@@ -47,8 +47,8 @@ ui  ──▶  domain  ◀──  data
 ```
 
 - `domain` — чистый Kotlin: модели, парсер ценника, use case-ы, интерфейсы репозиториев.
-  **Не зависит** от Android SDK, Compose, Room, Hilt, ML Kit.
-- `data` — реализации: Room, DataStore, CameraX-контроллер, ML Kit-обёртка, репозитории.
+  **Не зависит** от Android SDK, Compose, Room, Hilt, OCR-движков.
+- `data` — реализации: Room, DataStore, CameraX-контроллер, обёртки Tesseract/RapidOCR, репозитории.
 - `ui` — Compose-экран, ViewModel, state. ViewModel разговаривает только с use case-ами/репозиториями.
 - Парсер и расчёт цены за единицу — **чистые функции**, покрываются юнит-тестами обязательно.
 

@@ -12,5 +12,7 @@ sealed interface OcrResult {
 
     data object CameraError : OcrResult
 
+    data object OcrEngineError : OcrResult
+
     data object PermissionDenied : OcrResult
 }

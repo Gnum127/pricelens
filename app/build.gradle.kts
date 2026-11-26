@@ -70,7 +70,13 @@ dependencies {
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
-    implementation(libs.mlkit.text.recognition)
+
+    // Оба AAR лежат в репозитории: сборка воспроизводимая и не требует сети.
+    // Модели RapidOCR уже внутри его AAR, rus.traineddata — в assets приложения.
+    val rapidOcrVersion = libs.versions.rapidOcr.get()
+    val tesseractVersion = libs.versions.tesseract4android.get()
+    implementation(files("libs/OcrLibrary-$rapidOcrVersion-release.aar"))
+    implementation(files("libs/tesseract4android-$tesseractVersion.aar"))
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

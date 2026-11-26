@@ -5,6 +5,7 @@ import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.RawTextResult
 import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.WeightUnit
+import com.pricelens.domain.parser.OcrTokenMerger
 import com.pricelens.domain.parser.PriceTagParser
 import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.ImageTextProvider
@@ -13,6 +14,7 @@ import com.pricelens.domain.usecase.AddItemUseCase
 import com.pricelens.domain.usecase.CompareItemsUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
+import com.pricelens.testing.singleLineFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -88,7 +90,7 @@ class CompareViewModelTest {
 
     @Test
     fun explicitKilogramPriceGetsEditableBaseAmountAndPrice() {
-        provider.result = RawTextResult.Success("Цена за 1 кг: 685,71 ₽")
+        provider.result = textResult("Цена за 1 кг: 685,71 ₽")
         val viewModel = viewModel()
 
         viewModel.onAction(UiAction.CaptureConfirmed)
@@ -110,7 +112,7 @@ class CompareViewModelTest {
 
     @Test
     fun explicitLiterPriceGetsEditableBaseAmountAndPrice() {
-        provider.result = RawTextResult.Success("Цена за 1 л: 129,90 ₽")
+        provider.result = textResult("Цена за 1 л: 129,90 ₽")
         val viewModel = viewModel()
 
         viewModel.onAction(UiAction.CaptureConfirmed)
@@ -143,7 +145,7 @@ class CompareViewModelTest {
 
     @Test
     fun unparseableTextEmitsMessageWithRawText() {
-        provider.result = RawTextResult.Success("непонятный ценник")
+        provider.result = textResult("непонятный ценник")
         val viewModel = viewModel()
 
         val event = expectMessage(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
@@ -161,6 +163,17 @@ class CompareViewModelTest {
         val event = expectMessage(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
 
         assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.CameraError))
+    }
+
+    @Test
+    fun ocrEngineErrorEmitsMessage() {
+        provider.result = RawTextResult.OcrEngineError
+        val viewModel = viewModel()
+
+        val event = expectMessage(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.OcrEngineError))
+        assertThat(viewModel.uiState.value.items).isEmpty()
     }
 
     @Test
@@ -241,7 +254,7 @@ class CompareViewModelTest {
         viewModel.onAction(UiAction.CaptureConfirmed)
         advance()
         val firstId = viewModel.uiState.value.items.single().id
-        provider.result = RawTextResult.Success("320 г 212 ₽")
+        provider.result = textResult("320 г 212 ₽")
         viewModel.onAction(UiAction.CaptureConfirmed)
         advance()
         assertThat(viewModel.uiState.value.cheapestId).isNotEqualTo(firstId)
@@ -281,7 +294,7 @@ class CompareViewModelTest {
 
         assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
         val state = viewModel.uiState.value
-        assertThat(state.items.single().unitPrice).isEqualTo(item.unitPrice)
+        assertThat(state.items.single()).isEqualTo(item)
         assertThat(state.drafts[item.id]?.amount).isEqualTo("abc")
     }
 
@@ -299,6 +312,69 @@ class CompareViewModelTest {
 
         assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
         assertThat(viewModel.uiState.value.items.single().unitPrice).isEqualTo(item.unitPrice)
+    }
+
+    @Test
+    fun invalidAmountEditKeepsRangeItemAndRawDraft() {
+        repository.items = listOf(rangeItem("range"))
+        val viewModel = viewModel()
+        val item = viewModel.uiState.value.items.single()
+
+        val event = expectMessage(viewModel) {
+            viewModel.onAction(UiAction.AmountChanged(item.id, "abc"))
+        }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
+        val state = viewModel.uiState.value
+        assertThat(state.items.single()).isEqualTo(item)
+        assertThat(state.drafts[item.id]?.amount).isEqualTo("abc")
+    }
+
+    @Test
+    fun validAmountEditClearsRangeLabelAndRecalculates() {
+        repository.items = listOf(rangeItem("range"))
+        val viewModel = viewModel()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.AmountChanged(id, "230"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.packageAmount, "230")
+        assertThat(item.packageAmountLabel).isNull()
+        assertDecimal(item.price, "139.99")
+        assertDecimal(item.unitPrice.value, "608.65")
+        assertThat(viewModel.uiState.value.drafts[id]?.amount).isEqualTo("230")
+    }
+
+    @Test
+    fun priceEditKeepsRangeLabelAndRecalculatesFromUpperBound() {
+        repository.items = listOf(rangeItem("range"))
+        val viewModel = viewModel()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceChanged(id, "139,00"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.price, "139.00")
+        assertDecimal(item.packageAmount, "240")
+        assertThat(item.packageAmountLabel).isEqualTo("230-240 г")
+        assertDecimal(item.unitPrice.value, "579.17")
+        assertThat(viewModel.uiState.value.drafts[id]?.price).isEqualTo("139,00")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["0", "-1", "abc"])
+    fun invalidPriceEditDoesNotChangeItem(value: String) {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val item = viewModel.uiState.value.items.single()
+
+        val event = expectMessage(viewModel) { viewModel.onAction(UiAction.PriceChanged(item.id, value)) }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
+        assertThat(viewModel.uiState.value.items.single()).isEqualTo(item)
+        assertThat(viewModel.uiState.value.drafts[item.id]?.price).isEqualTo(value)
     }
 
     @Test
@@ -655,8 +731,10 @@ class CompareViewModelTest {
         assertThat(after.drafts).isEqualTo(before.drafts)
     }
 
+    private fun textResult(text: String): RawTextResult = RawTextResult.Success(singleLineFrame(text))
+
     private fun addItem(viewModel: CompareViewModel, text: String): ProductItem {
-        provider.result = RawTextResult.Success(text)
+        provider.result = textResult(text)
         viewModel.onAction(UiAction.CaptureConfirmed)
         advance()
         return viewModel.uiState.value.items.last()
@@ -703,9 +781,10 @@ class CompareViewModelTest {
         val calculator = UnitPriceCalculator()
         return CompareViewModel(
             recognizePriceTag = RecognizePriceTagUseCase(
-                imageTextProvider,
-                PriceTagParser(),
-                calculator,
+                imageTextProvider = imageTextProvider,
+                merger = OcrTokenMerger(),
+                parser = PriceTagParser(),
+                calculator = calculator,
             ),
             addItem = AddItemUseCase(),
             removeItemUseCase = RemoveItemUseCase(),
@@ -714,6 +793,21 @@ class CompareViewModelTest {
             repository = repository,
         ).also { if (completeLoad) advance() }
     }
+
+    private fun assertDecimal(actual: BigDecimal?, expected: String) {
+        assertThat(actual).isNotNull()
+        assertThat(actual!!.compareTo(BigDecimal(expected))).isEqualTo(0)
+    }
+
+    private fun rangeItem(id: String) = ProductItem(
+        id = id,
+        name = "Консервы рыбные шпроты в масле",
+        packageAmount = BigDecimal("240"),
+        packageAmountLabel = "230-240 г",
+        packageUnit = WeightUnit.GRAM,
+        price = BigDecimal("139.99"),
+        unitPrice = UnitPrice(BigDecimal("583.29"), UnitPrice.Unit.KILOGRAM),
+    )
 
     private fun product(
         id: String,
@@ -754,7 +848,7 @@ class CompareViewModelTest {
 
     private class GatedImageTextProvider : ImageTextProvider {
         val gates = mutableListOf<CompletableDeferred<Unit>>()
-        var result: RawTextResult = RawTextResult.Success("350 г 240 ₽")
+        var result: RawTextResult = RawTextResult.Success(singleLineFrame("350 г 240 ₽"))
         var readCalls: Int = 0
             private set
 
@@ -768,7 +862,7 @@ class CompareViewModelTest {
     }
 
     private class FakeImageTextProvider : ImageTextProvider {
-        var result: RawTextResult = RawTextResult.Success("350 г 240 ₽")
+        var result: RawTextResult = RawTextResult.Success(singleLineFrame("350 г 240 ₽"))
         var readCalls: Int = 0
 
         override suspend fun readText(): RawTextResult {

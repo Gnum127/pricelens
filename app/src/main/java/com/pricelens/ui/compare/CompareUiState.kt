@@ -23,6 +23,7 @@ sealed interface CompareMessage {
     data object EmptyText : CompareMessage
     data class Unparseable(val rawText: String) : CompareMessage
     data object CameraError : CompareMessage
+    data object OcrEngineError : CompareMessage
     data object PermissionDenied : CompareMessage
     data object LimitReached : CompareMessage
     data object StorageError : CompareMessage

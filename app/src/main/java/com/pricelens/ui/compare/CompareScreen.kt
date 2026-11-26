@@ -58,7 +58,7 @@ fun CompareScreen(
             items(items = state.items, key = { it.id }) { item ->
                 val draft = state.drafts[item.id] ?: ItemDraft(
                     name = item.name,
-                    amount = item.packageAmount?.let(::formatAmount).orEmpty(),
+                    amount = item.packageAmountLabel ?: item.packageAmount?.let(::formatAmount).orEmpty(),
                     price = item.price?.let(::formatMoney).orEmpty(),
                 )
                 val difference = if (item.id != state.cheapestId && best != null) {

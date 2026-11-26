@@ -1,5 +1,6 @@
 package com.pricelens.data.camera
 
+import com.pricelens.data.ocr.OcrEngineUnavailableException
 import com.pricelens.data.ocr.TextRecognizer
 import com.pricelens.domain.model.RawTextResult
 import com.pricelens.domain.repository.ImageTextProvider
@@ -16,8 +17,14 @@ class CameraImageTextProvider(
 
         val image = cameraController.takePicture() ?: return RawTextResult.CameraError
         try {
-            val text = withContext(Dispatchers.IO) { textRecognizer.recognize(image) }
-            return if (text.isNullOrBlank()) RawTextResult.EmptyText else RawTextResult.Success(text)
+            val frame = withContext(Dispatchers.IO) { textRecognizer.recognize(image) }
+            return if (frame == null || frame.tokens.isEmpty()) {
+                RawTextResult.EmptyText
+            } else {
+                RawTextResult.Success(frame)
+            }
+        } catch (unavailable: OcrEngineUnavailableException) {
+            return RawTextResult.OcrEngineError
         } finally {
             image.close()
         }

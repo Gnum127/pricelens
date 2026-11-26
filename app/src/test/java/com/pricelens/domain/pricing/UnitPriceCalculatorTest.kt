@@ -5,6 +5,8 @@ import com.pricelens.domain.model.ParsedPriceTag
 import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.WeightUnit
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 
 class UnitPriceCalculatorTest {
@@ -122,6 +124,34 @@ class UnitPriceCalculatorTest {
         assertThat(calculator.calculatePerLiter(BigDecimal.ZERO, BigDecimal("950"))).isNull()
         assertThat(calculator.calculatePerLiter(BigDecimal("-1"), BigDecimal("950"))).isNull()
         assertThat(calculator.calculatePerLiter(BigDecimal("100"), BigDecimal("-1"))).isNull()
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "1, 240, GRAM, 240000.00, KILOGRAM",
+        "999, 240, GRAM, 240.24, KILOGRAM",
+        "1001, 240, GRAM, 239.76, KILOGRAM",
+        "1, 0.01, MILLILITER, 10.00, LITER",
+        "1, 1000000000, GRAM, 1000000000000.00, KILOGRAM",
+    )
+    fun boundaryAmountsAndPricesAreCalculatedWithoutOverflow(
+        amount: String,
+        price: String,
+        unit: String,
+        expected: String,
+        expectedUnit: String,
+    ) {
+        val result = calculator.calculate(
+            ParsedPriceTag(
+                packageAmount = BigDecimal(amount),
+                packageUnit = WeightUnit.valueOf(unit),
+                price = BigDecimal(price),
+            ),
+        )
+
+        assertThat(result).isNotNull()
+        assertThat(result!!.displayUnit).isEqualTo(UnitPrice.Unit.valueOf(expectedUnit))
+        assertDecimal(result.value, expected)
     }
 
     @Test

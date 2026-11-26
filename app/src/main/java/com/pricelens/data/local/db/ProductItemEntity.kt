@@ -26,6 +26,7 @@ data class ProductItemEntity(
     val position: Int,
     val name: String,
     val packageAmount: BigDecimal?,
+    val packageAmountLabel: String? = null,
     val packageUnit: WeightUnit?,
     val price: BigDecimal?,
     val unitPriceValue: BigDecimal,

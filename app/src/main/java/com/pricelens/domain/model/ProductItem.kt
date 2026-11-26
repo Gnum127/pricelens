@@ -6,6 +6,7 @@ data class ProductItem(
     val id: String,
     val name: String,
     val packageAmount: BigDecimal?,
+    val packageAmountLabel: String? = null,
     val packageUnit: WeightUnit?,
     val price: BigDecimal?,
     val unitPrice: UnitPrice,
