@@ -152,6 +152,7 @@ class CompareViewModel @Inject constructor(
                         failCapture(CompareMessage.Unparseable(result.rawText))
                     }
                     OcrResult.CameraError -> failCapture(CompareMessage.CameraError)
+                    OcrResult.OcrEngineError -> failCapture(CompareMessage.OcrEngineError)
                     OcrResult.PermissionDenied -> failCapture(CompareMessage.PermissionDenied)
                 }
             } finally {
@@ -178,14 +179,20 @@ class CompareViewModel @Inject constructor(
 
     private fun changeNumber(id: String, value: String, isAmount: Boolean) {
         val state = _uiState.value
-        val item = state.items.firstOrNull { it.id == id } ?: return
+        val original = state.items.firstOrNull { it.id == id } ?: return
         val draft = if (isAmount) {
-            (state.drafts[id] ?: item.toDraft()).copy(amount = value)
+            (state.drafts[id] ?: original.toDraft()).copy(amount = value)
         } else {
-            (state.drafts[id] ?: item.toDraft()).copy(price = value)
+            (state.drafts[id] ?: original.toDraft()).copy(price = value)
         }
 
-        val amount = draft.amount.toDecimal()
+        // В поле amount изначально лежит подпись диапазона («230-240 г»): это не число,
+        // но до первой правки веса расчёт должен идти от верхней границы диапазона.
+        val amount = if (draft.amount == original.packageAmountLabel) {
+            original.packageAmount
+        } else {
+            draft.amount.toDecimal()
+        }
         val price = draft.price.toDecimal()
         val changedValue = if (isAmount) draft.amount else draft.price
         val parsedValue = if (isAmount) amount else price
@@ -197,18 +204,28 @@ class CompareViewModel @Inject constructor(
         } else {
             invalidFields.remove(fieldKey)
         }
-        val recalculated = if (amount != null && price != null && item.packageUnit != null) {
+        val unitPrice = if (amount != null && price != null && original.packageUnit != null) {
             calculator.calculate(
                 ParsedPriceTag(
                     packageAmount = amount,
-                    packageUnit = item.packageUnit,
+                    packageUnit = original.packageUnit,
                     price = price,
                 ),
-            )?.let { item.copy(packageAmount = amount, price = price, unitPrice = it) }
+            )
         } else {
             null
         }
-        val items = if (recalculated != null) state.items.replace(id) { recalculated } else state.items
+        // Невалидная или незавершённая правка не портит сохранённый товар.
+        val updated = unitPrice?.let {
+            original.copy(
+                packageAmount = amount,
+                // Подпись диапазона сбрасывает только ручная правка веса.
+                packageAmountLabel = if (isAmount) null else original.packageAmountLabel,
+                price = price,
+                unitPrice = it,
+            )
+        }
+        val items = state.items.replace(id) { updated ?: original }
 
         _uiState.update {
             it.copy(
@@ -247,6 +264,7 @@ class CompareViewModel @Inject constructor(
             } else {
                 parsed.packageAmount
             },
+            packageAmountLabel = parsed.packageAmountLabel,
             packageUnit = when (explicitUnit) {
                 UnitPrice.Unit.KILOGRAM -> WeightUnit.GRAM
                 UnitPrice.Unit.LITER -> WeightUnit.MILLILITER
@@ -260,7 +278,7 @@ class CompareViewModel @Inject constructor(
 
     private fun ProductItem.toDraft() = ItemDraft(
         name = name,
-        amount = packageAmount?.let(::formatAmount).orEmpty(),
+        amount = packageAmountLabel ?: packageAmount?.let(::formatAmount).orEmpty(),
         price = price?.let(::formatMoney).orEmpty(),
     )
 

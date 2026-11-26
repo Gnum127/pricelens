@@ -25,6 +25,7 @@
     <string name="error_empty_text">Текст не распознан. Попробуйте ещё раз при хорошем освещении.</string>
     <string name="error_unparseable">Не удалось найти цену и вес. Проверьте данные вручную.</string>
     <string name="error_camera">Не удалось получить кадр. Попробуйте ещё раз.</string>
+    <string name="error_ocr_engine">Распознавание недоступно: не удалось загрузить локальную модель. Попробуйте перезапустить приложение.</string>
     <string name="error_permission">Без доступа к камере нельзя распознать ценник. Разрешите доступ в настройках приложения.</string>
     <string name="error_limit">Можно сравнить не более 5 товаров.</string>
     <string name="error_storage">Не удалось сохранить или загрузить товары.</string>

@@ -4,9 +4,11 @@ import com.google.common.truth.Truth.assertThat
 import com.pricelens.domain.model.OcrResult
 import com.pricelens.domain.model.RawTextResult
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.parser.OcrTokenMerger
 import com.pricelens.domain.parser.PriceTagParser
 import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.ImageTextProvider
+import com.pricelens.testing.singleLineFrame
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -15,8 +17,8 @@ import java.util.concurrent.CancellationException
 
 class RecognizePriceTagUseCaseTest {
     @Test
-    fun mapsSuccessfulTextToOcrSuccess() = runBlocking {
-        val result = useCase(RawTextResult.Success("350 г 240 ₽"))()
+    fun mapsSuccessfulFrameToOcrSuccess() = runBlocking {
+        val result = useCase(RawTextResult.Success(singleLineFrame("350 г 240 ₽")))()
 
         assertThat(result).isInstanceOf(OcrResult.Success::class.java)
         val success = result as OcrResult.Success
@@ -27,26 +29,36 @@ class RecognizePriceTagUseCaseTest {
 
     @Test
     fun mapsExplicitOnlyPriceToOcrSuccess() = runBlocking {
-        val result = useCase(RawTextResult.Success("Цена за 1 кг: 685,71 ₽"))()
+        val result = useCase(
+            RawTextResult.Success(singleLineFrame("Цена за 1 кг: 685,71 ₽")),
+        )()
 
         assertThat(result).isInstanceOf(OcrResult.Success::class.java)
         val success = result as OcrResult.Success
         assertThat(success.parsed.packageAmount).isNull()
-        assertDecimal(success.explicitUnitPriceValue(), "685.71")
+        assertDecimal(success.parsed.explicitUnitPrice, "685.71")
         assertDecimal(success.unitPrice.value, "685.71")
     }
 
     @Test
-    fun mapsUnparseableText() = runBlocking {
-        val result = useCase(RawTextResult.Success("240 ₽"))()
+    fun mapsUnparseableFrame() = runBlocking {
+        val result = useCase(RawTextResult.Success(singleLineFrame("240 ₽")))()
 
         assertThat(result).isInstanceOf(OcrResult.Unparseable::class.java)
         assertThat((result as OcrResult.Unparseable).rawText).isEqualTo("240 ₽")
     }
 
     @Test
-    fun mapsBlankTextToEmptyText() = runBlocking {
-        assertThat(useCase(RawTextResult.Success("   "))()).isEqualTo(OcrResult.EmptyText)
+    fun mapsFrameWithBlankTokensToEmptyText() = runBlocking {
+        assertThat(
+            useCase(RawTextResult.Success(singleLineFrame("   ")))(),
+        ).isEqualTo(OcrResult.EmptyText)
+    }
+
+    @Test
+    fun mapsEmptyFrameToEmptyText() = runBlocking {
+        val emptyFrame = singleLineFrame("350 г 240 ₽").copy(tokens = emptyList())
+        assertThat(useCase(RawTextResult.Success(emptyFrame))()).isEqualTo(OcrResult.EmptyText)
     }
 
     @Test
@@ -62,6 +74,11 @@ class RecognizePriceTagUseCaseTest {
     @Test
     fun mapsPermissionDenied() = runBlocking {
         assertThat(useCase(RawTextResult.PermissionDenied)()).isEqualTo(OcrResult.PermissionDenied)
+    }
+
+    @Test
+    fun mapsOcrEngineError() = runBlocking {
+        assertThat(useCase(RawTextResult.OcrEngineError)()).isEqualTo(OcrResult.OcrEngineError)
     }
 
     @Test
@@ -82,6 +99,7 @@ class RecognizePriceTagUseCaseTest {
 
     private fun useCase(result: RawTextResult): RecognizePriceTagUseCase = RecognizePriceTagUseCase(
         imageTextProvider = ImageTextProvider { result },
+        merger = OcrTokenMerger(),
         parser = PriceTagParser(),
         calculator = UnitPriceCalculator(),
     )
@@ -89,11 +107,10 @@ class RecognizePriceTagUseCaseTest {
     private fun throwingUseCase(throwable: Throwable): RecognizePriceTagUseCase =
         RecognizePriceTagUseCase(
             imageTextProvider = ImageTextProvider { throw throwable },
+            merger = OcrTokenMerger(),
             parser = PriceTagParser(),
             calculator = UnitPriceCalculator(),
         )
-
-    private fun OcrResult.Success.explicitUnitPriceValue(): BigDecimal? = parsed.explicitUnitPrice
 
     private fun assertDecimal(actual: BigDecimal?, expected: String) {
         assertThat(actual).isNotNull()

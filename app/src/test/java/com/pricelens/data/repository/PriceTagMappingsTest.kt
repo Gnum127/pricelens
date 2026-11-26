@@ -51,6 +51,16 @@ class PriceTagMappingsTest {
     }
 
     @Test
+    fun keepsWeightRangeLabelFromTag() {
+        val item = item("range").copy(packageAmountLabel = "230-240 г")
+
+        val entity = item.toEntity(position = 0)
+
+        assertThat(entity.packageAmountLabel).isEqualTo("230-240 г")
+        assertThat(entity.toDomain()).isEqualTo(item)
+    }
+
+    @Test
     fun mapsItemWithoutSourceText() {
         val item = item("no-source").copy(sourceText = null)
 

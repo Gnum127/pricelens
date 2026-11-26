@@ -14,9 +14,11 @@ pricelens/
 ├── app/
 │   ├── build.gradle.kts           # applicationId, namespace, dependencies
 │   ├── lint.xml                   # подавление информационных предупреждений о версиях
+│   ├── libs/                      # локальные AAR: RapidOCR 1.3.0, Tesseract4Android 4.9.0
 │   └── src/
 │       ├── main/
 │       │   ├── AndroidManifest.xml
+│       │   ├── assets/tessdata/            # rus.traineddata (включён в APK)
 │       │   ├── java/com/pricelens/
 │       │   │   ├── PriceLensApp.kt            # @HiltAndroidApp
 │       │   │   ├── MainActivity.kt             # @AndroidEntryPoint, setContent
@@ -24,16 +26,16 @@ pricelens/
 │       │   │   │   ├── design/                 # AppTheme, Color/Shape/Type, PriceCard, AddTile, UnitPriceBadge
 │       │   │   │   └── util/                   # Result-алиасы, decimal formatters, Dispatchers
 │       │   │   ├── domain/
-│       │   │   │   ├── model/                  # ProductItem, ParsedPriceTag, UnitPrice, Unit/WeightUnit
-│       │   │   │   ├── parser/                 # PriceTagParser (чистый Kotlin)
+│       │   │   │   ├── model/                  # ProductItem, ParsedPriceTag, UnitPrice, OcrFrame/OcrToken/OcrBox
+│       │   │   │   ├── parser/                 # OcrTokenMerger + PriceTagParser (чистый Kotlin)
 │       │   │   │   ├── pricing/                # UnitPriceCalculator, сравнение
 │       │   │   │   ├── usecase/                # Recognize/Add/Remove/Compare use cases
 │       │   │   │   └── repository/             # интерфейс PriceTagRepository
 │       │   │   ├── data/
 │       │   │   │   ├── camera/                 # CameraController (CameraX)
-│       │   │   │   ├── ocr/                    # MlKitTextRecognizer, TextRecognizer interface
+│       │   │   │   ├── ocr/                    # TwoLayerTextRecognizer, TesseractOcr, RapidOcr, TextRecognizer
 │       │   │   │   ├── local/
-│       │   │   │   │   ├── db/                 # AppDatabase, DAO, Entity, Converters
+│       │   │   │   │   ├── db/                 # AppDatabase, DAO, Entity, Converters, Migrations
 │       │   │   │   │   └── datastore/          # SettingsDataStore
 │       │   │   │   └── repository/             # PriceTagRepositoryImpl
 │       │   │   ├── ui/
@@ -57,7 +59,9 @@ pricelens/
 │   ├── product.md                  # идея, скоуп прототипа, не-цели
 │   ├── architecture.md             # слои, потоки, решения
 │   ├── structure.md                # этот файл
-│   └── ocr-notes.md                # форматы ценников и правила парсинга
+│   ├── ocr-notes.md                # форматы ценников и правила парсинга
+│   ├── third-party-licenses.md     # лицензии и атрибуция bundled OCR-библиотек
+│   └── licenses/                   # полные тексты лицензий (APACHE-2.0.txt)
 ```
 
 ## Куда класть новый код

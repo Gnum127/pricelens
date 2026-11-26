@@ -202,6 +202,63 @@ class PriceTagParserTest {
         assertThat(parser.parse("350 г 0 ₽")).isNull()
     }
 
+    @Test
+    fun parsesWeightRangeAndKeepsItsLabel() {
+        val parsed = parser.parse("Консервы рыбные шпроты в масле\n230-240 г\n139,99 ₽/шт")
+
+        assertThat(parsed).isNotNull()
+        parsed!!.let {
+            assertThat(it.name).isEqualTo("Консервы рыбные шпроты в масле")
+            assertThat(it.packageAmountLabel).isEqualTo("230-240 г")
+            assertDecimal(it.packageAmount, "240")
+            assertThat(it.packageUnit).isEqualTo(WeightUnit.GRAM)
+            assertDecimal(it.price, "139.99")
+        }
+    }
+
+    @Test
+    fun preservesQuotesAndSlashAbbreviationsInName() {
+        val parsed = parser.parse(
+            "Консервы рыбные тунец «За Родину» с киноа и травами, ж/б\n160 г\n119,99 ₽/шт",
+        )
+
+        assertThat(parsed).isNotNull()
+        assertThat(parsed!!.name)
+            .isEqualTo("Консервы рыбные тунец «За Родину» с киноа и травами, ж/б")
+        assertDecimal(parsed.price, "119.99")
+    }
+
+    @Test
+    fun keepsExactPateNameEndingAndKopecks() {
+        val parsed = parser.parse("Паштет «В Три Приёма» со вкусом копчёная индейка\n70 г\n24,99 ₽/шт")
+
+        assertThat(parsed).isNotNull()
+        parsed!!.let {
+            assertThat(it.name).isEqualTo("Паштет «В Три Приёма» со вкусом копчёная индейка")
+            assertDecimal(it.price, "24.99")
+        }
+    }
+
+    @Test
+    fun parsesExactPateKopecks() {
+        // Защита от ошибочных копеек 66 живёт на уровне OcrTokenMerger (5.jpg/6.jpg),
+        // здесь проверяется, что парсер не теряет копейки в канонической строке.
+        val parsed = parser.parse("Паштет «В Три Приёма» со вкусом бекона\n70г\n24,99 ₽/шт")
+
+        assertThat(parsed).isNotNull()
+        assertDecimal(parsed!!.price, "24.99")
+    }
+
+    @Test
+    fun ignoresMilligramsAsPackageAmount() {
+        assertThat(parser.parse("Витамины 500 мг 299 ₽")).isNull()
+    }
+
+    @Test
+    fun pricePerKgWithoutDigitOneIsNotExplicitUnitPrice() {
+        assertThat(parser.parse("Цена за кг: 685,71 ₽")).isNull()
+    }
+
     private fun assertDecimal(actual: BigDecimal?, expected: String) {
         assertThat(actual).isNotNull()
         assertThat(actual!!.compareTo(BigDecimal(expected))).isEqualTo(0)

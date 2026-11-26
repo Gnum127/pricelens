@@ -1,5 +1,6 @@
 package com.pricelens.di
 
+import com.pricelens.domain.parser.OcrTokenMerger
 import com.pricelens.domain.parser.PriceTagParser
 import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.ImageTextProvider
@@ -22,15 +23,20 @@ object UseCaseModule {
 
     @Provides
     @Singleton
+    fun provideMerger(): OcrTokenMerger = OcrTokenMerger()
+
+    @Provides
+    @Singleton
     fun provideCalculator(): UnitPriceCalculator = UnitPriceCalculator()
 
     @Provides
     @Singleton
     fun provideRecognizePriceTag(
         imageTextProvider: ImageTextProvider,
+        merger: OcrTokenMerger,
         parser: PriceTagParser,
         calculator: UnitPriceCalculator,
-    ): RecognizePriceTagUseCase = RecognizePriceTagUseCase(imageTextProvider, parser, calculator)
+    ): RecognizePriceTagUseCase = RecognizePriceTagUseCase(imageTextProvider, merger, parser, calculator)
 
     @Provides
     @Singleton
