@@ -5,6 +5,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import java.math.BigDecimal
 
@@ -29,7 +30,9 @@ data class ProductItemEntity(
     val packageAmountLabel: String? = null,
     val packageUnit: WeightUnit?,
     val price: BigDecimal?,
+    val priceByCard: BigDecimal? = null,
     val unitPriceValue: BigDecimal,
     val unitPriceUnit: UnitPrice.Unit,
+    val unitPriceSource: UnitPriceSource = UnitPriceSource.PACKAGE,
     val sourceText: String?,
 )

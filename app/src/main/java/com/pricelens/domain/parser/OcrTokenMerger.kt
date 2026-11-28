@@ -24,17 +24,51 @@ class OcrTokenMerger {
         val anchors = findAnchors(rapid)
         val anchor = findAnchor(frame, anchors) ?: return fallbackText(tesseract, rapid)
 
+        // Все цены одного ценника объединяются в кластер: вторая цена не берётся от соседа.
+        val cluster = anchors.filter { it === anchor || isSameTag(it, anchor) }
+        val cardLabel = tesseract.firstOrNull { token ->
+            cardLabelRegex.containsMatchIn(token.text) &&
+                cluster.any { inTagBand(token, it) && inWeightBand(token, it) }
+        }
+        // Без явной подписи «по карте» вторая крупная цена может оказаться ценой соседнего
+        // ценника — называть её скидочной нельзя. Роль цены определяет подпись, а не близость
+        // к центру кадра: если подпись стоит у центральной цены, скидочная — именно она.
+        val cardAnchor = cardLabel?.let { label ->
+            cluster.minByOrNull { centerDistance(label.box, it.box) }
+        }
+        val primaryAnchor = cardAnchor?.let { card ->
+            cluster.firstOrNull { it !== card } ?: card
+        } ?: anchor
+
         val weightToken = tesseract.firstNotNullOfOrNull { token ->
             token
-                .takeIf { inTagBand(it, anchor) && inNameBand(it, anchor) && belongsToAnchor(it, anchor, anchors) }
+                .takeIf {
+                    cluster.any { candidate ->
+                        inTagBand(it, candidate) && inWeightBand(it, candidate)
+                    } && belongsToCluster(it, cluster, anchors)
+                }
                 ?.let(::asWeight)
         }
         val weight = weightToken?.let { weightRegex.find(it.text.replace('\u00A0', ' ')) }
-        val kopecks = findKopecks(anchor, anchors, tesseract, rapid)
-        val priceLine = buildPriceLine(anchor, anchors, kopecks, rapid)
-        val name = buildName(tesseract, anchor, anchors, weightToken, weight)
+        val name = buildName(tesseract, cluster, anchors, weightToken, weight)
+        val priceLine = buildPriceLine(
+            primaryAnchor,
+            anchors,
+            findKopecks(primaryAnchor, anchors, tesseract, rapid),
+            rapid,
+        )
+        val cardLine = cardAnchor?.takeIf { it !== primaryAnchor }?.let { card ->
+            val cardPrice = buildPriceLine(
+                card,
+                anchors,
+                findKopecks(card, anchors, tesseract, rapid),
+                rapid,
+                includeUnit = false,
+            )
+            "$cardPrice по карте"
+        }
 
-        return listOfNotNull(name, weight?.let(::normalizeWeight), priceLine)
+        return listOfNotNull(name, weight?.let(::normalizeWeight), priceLine, cardLine)
             .joinToString("\n")
     }
 
@@ -89,6 +123,30 @@ class OcrTokenMerger {
         token.box.bottom >= anchor.box.top - anchor.box.height * NAME_ABOVE &&
             token.box.bottom <= anchor.box.top + anchor.box.height * NAME_BAND
 
+    /** Вес на новых ценниках печатается под ценой, на старых — над ней. */
+    private fun inWeightBand(token: OcrToken, anchor: OcrToken): Boolean =
+        token.box.bottom >= anchor.box.top - anchor.box.height * NAME_ABOVE &&
+            token.box.bottom <= anchor.box.bottom + anchor.box.height * WEIGHT_BELOW
+
+    /** Токен относится к кластеру ценника, даже если он ближе к скидочной цене. */
+    private fun belongsToCluster(
+        token: OcrToken,
+        cluster: List<OcrToken>,
+        allAnchors: List<OcrToken>,
+    ): Boolean {
+        val nearest = cluster.minByOrNull { centerDistance(token.box, it.box) } ?: return false
+        val best = centerDistance(token.box, nearest.box)
+        return allAnchors.all { other ->
+            cluster.any { it === other } || best <= centerDistance(token.box, other.box)
+        }
+    }
+
+    /** Две цены одного ценника находятся рядом по обеим осям, но их box могут не пересекаться. */
+    private fun isSameTag(first: OcrToken, second: OcrToken): Boolean {
+        val maxHeight = maxOf(first.box.height, second.box.height)
+        return centerDistance(first.box, second.box) <= maxHeight * maxHeight * SAME_TAG_DISTANCE
+    }
+
     private fun findKopecks(
         anchor: OcrToken,
         anchors: List<OcrToken>,
@@ -124,18 +182,24 @@ class OcrTokenMerger {
         anchors: List<OcrToken>,
         kopecks: OcrToken?,
         rapid: List<OcrToken>,
+        includeUnit: Boolean = true,
     ): String {
         val kopecksText = kopecks?.text?.trim()
         val price = if (kopecksText != null) "${anchor.text.trim()},$kopecksText" else anchor.text.trim()
-        val unit = rapid.firstOrNull { token ->
-            inTagBand(token, anchor) &&
-                belongsToAnchor(token, anchor, anchors) &&
-                token.box.top < anchor.box.bottom &&
-                token.box.bottom > anchor.box.top &&
-                token.text.matches(unitRegex)
-        }?.text?.lowercase().orEmpty()
+        val unit = if (includeUnit) {
+            rapid.firstOrNull { token ->
+                inTagBand(token, anchor) &&
+                    belongsToAnchor(token, anchor, anchors) &&
+                    token.box.top < anchor.box.bottom &&
+                    token.box.bottom > anchor.box.top &&
+                    token.text.matches(unitRegex)
+            }?.text?.lowercase().orEmpty()
+        } else {
+            ""
+        }
 
         val suffix = when {
+            !includeUnit -> "₽"
             "kr" in unit || "кг" in unit -> "₽/кг"
             unit.isNotBlank() -> "₽/шт"
             else -> "₽"
@@ -145,14 +209,15 @@ class OcrTokenMerger {
 
     private fun buildName(
         tesseract: List<OcrToken>,
-        anchor: OcrToken,
+        cluster: List<OcrToken>,
         anchors: List<OcrToken>,
         weightToken: OcrToken?,
         weight: MatchResult?,
     ): String? {
         val name = tesseract
             .filter {
-                inTagBand(it, anchor) && inNameBand(it, anchor) && belongsToAnchor(it, anchor, anchors)
+                cluster.any { candidate -> inTagBand(it, candidate) && inNameBand(it, candidate) } &&
+                    belongsToCluster(it, cluster, anchors)
             }
             .filter { it.text.any(Char::isLetter) }
             .map { token ->
@@ -163,7 +228,7 @@ class OcrTokenMerger {
                 }
                 text.trim()
             }
-            .filter { it.isNotBlank() && !isNoise(it) }
+            .filter { it.isNotBlank() && !isNoise(it) && !cardLabelRegex.containsMatchIn(it) }
             .joinToString(" ")
             .replace(quotedTextRegex) { "«${it.groupValues[1]}»" }
             .trim()
@@ -212,6 +277,8 @@ class OcrTokenMerger {
         const val KOPECK_RIGHT_BAND = 0.8f
         const val NAME_ABOVE = 0.6f
         const val NAME_BAND = 0.1f
+        const val WEIGHT_BELOW = 0.6f
+        const val SAME_TAG_DISTANCE = 6f
         const val MAX_KOPECK_HEIGHT = 0.8f
 
         val rublesRegex = Regex("""\d{2,3}""")
@@ -226,6 +293,7 @@ class OcrTokenMerger {
         val longDigitRegex = Regex("""\d{6,}""")
         val rubleUnitRegex = Regex("""(?iu)(?<![\p{L}\d])(?:руб|py6|шт|wt|ut)(?![\p{L}\d])""")
         val quotedTextRegex = Regex(""""([^"]+)"""")
+        val cardLabelRegex = Regex("""(?iu)по\s*карте""")
         val noiseWords = setOf(
             "цена", "вес", "объём", "объем", "акция", "скидка", "стакан",
         )

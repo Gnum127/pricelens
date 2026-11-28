@@ -6,6 +6,7 @@ data class ItemDraft(
     val name: String,
     val amount: String,
     val price: String,
+    val priceByCard: String = "",
 )
 
 data class CompareUiState(
@@ -39,6 +40,7 @@ sealed interface UiAction {
     data class NameChanged(val id: String, val value: String) : UiAction
     data class AmountChanged(val id: String, val value: String) : UiAction
     data class PriceChanged(val id: String, val value: String) : UiAction
+    data class PriceByCardChanged(val id: String, val value: String) : UiAction
     data class ItemRemoved(val id: String) : UiAction
 }
 

@@ -17,13 +17,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -33,6 +36,7 @@ import com.pricelens.data.camera.CameraController
 import com.pricelens.data.camera.CameraPermissionChecker
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.ui.capture.CapturePanel
 import java.math.BigDecimal
@@ -87,6 +91,63 @@ class CompareScreenTest {
         composeTestRule.onNodeWithText(text(R.string.add_item)).performClick()
 
         assertEquals(listOf(UiAction.AddClicked), actions)
+    }
+
+    @Test
+    fun cardPriceFieldIsEditableAndUsedPriceIsVisible() {
+        val actions = mutableListOf<UiAction>()
+        val item = product("card", "Печенье", "1215.00").copy(priceByCard = BigDecimal("243"))
+        val initialDraft = ItemDraft("Печенье", "200", "270,00", "243,00")
+        val currentState = mutableStateOf(
+            CompareUiState(
+                items = listOf(item),
+                drafts = mapOf(item.id to initialDraft),
+                isLoading = false,
+            ),
+        )
+        renderCompare(
+            state = { currentState.value },
+            onAction = { action ->
+                actions.add(action)
+                if (action is UiAction.PriceByCardChanged) {
+                    currentState.value = currentState.value.copy(
+                        drafts = currentState.value.drafts +
+                            (item.id to initialDraft.copy(priceByCard = action.value)),
+                    )
+                }
+            },
+        )
+
+        composeTestRule.onNodeWithText(text(R.string.price_by_card_label)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.used_card_price)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("243,00").performTextReplacement("250")
+
+        assertEquals(listOf(UiAction.PriceByCardChanged(item.id, "250")), actions)
+    }
+
+    @Test
+    fun explicitUnitPriceSourceIsShownInsteadOfCardDiscount() {
+        val item = product("explicit", "Печенье", "685.71")
+            .copy(priceByCard = BigDecimal("200"), unitPriceSource = UnitPriceSource.EXPLICIT)
+        renderCompare(CompareUiState(items = listOf(item), isLoading = false))
+
+        composeTestRule.onNodeWithText(text(R.string.used_explicit_price)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.used_card_price)).assertIsNotDisplayed()
+    }
+
+    @Test
+    fun regularPriceIsShownAsUsedWhenCardPriceIsAbsentOrWorse() {
+        val withoutCard = product("a", "Печенье", "1215.00")
+        val worseCard = withoutCard.copy(priceByCard = BigDecimal("400"))
+
+        renderCompare(CompareUiState(items = listOf(withoutCard, worseCard), isLoading = false))
+
+        composeTestRule.onAllNodesWithText(text(R.string.used_regular_price)).apply {
+            assertCountEquals(2)
+            get(0).assertIsDisplayed()
+            get(1).assertIsDisplayed()
+        }
+        composeTestRule.onAllNodesWithText(text(R.string.used_card_price)).assertCountEquals(0)
     }
 
     @Test
@@ -281,10 +342,14 @@ class CompareScreenTest {
     )
 
     private fun renderCompare(state: CompareUiState, onAction: (UiAction) -> Unit = {}) {
+        renderCompare(state = { state }, onAction = onAction)
+    }
+
+    private fun renderCompare(state: () -> CompareUiState, onAction: (UiAction) -> Unit = {}) {
         composeTestRule.setContent {
             AppTheme {
                 CompareScreen(
-                    state = state,
+                    state = state(),
                     cameraController = FakeCameraController(),
                     permissionChecker = CameraPermissionChecker { false },
                     snackbarHostState = SnackbarHostState(),

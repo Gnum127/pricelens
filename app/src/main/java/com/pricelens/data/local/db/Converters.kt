@@ -2,6 +2,7 @@ package com.pricelens.data.local.db
 
 import androidx.room.TypeConverter
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import java.math.BigDecimal
 
@@ -25,4 +26,12 @@ class Converters {
     @TypeConverter
     fun stringToUnitPriceUnit(value: String?): UnitPrice.Unit? =
         value?.let { stored -> runCatching { UnitPrice.Unit.valueOf(stored) }.getOrNull() }
+
+    @TypeConverter
+    fun unitPriceSourceToString(value: UnitPriceSource?): String? = value?.name
+
+    @TypeConverter
+    fun stringToUnitPriceSource(value: String?): UnitPriceSource =
+        value?.let { stored -> runCatching { UnitPriceSource.valueOf(stored) }.getOrNull() }
+            ?: UnitPriceSource.PACKAGE
 }

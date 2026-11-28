@@ -26,9 +26,9 @@ pricelens/
 │       │   │   │   ├── design/                 # AppTheme, Color/Shape/Type, PriceCard, AddTile, UnitPriceBadge
 │       │   │   │   └── util/                   # Result-алиасы, decimal formatters, Dispatchers
 │       │   │   ├── domain/
-│       │   │   │   ├── model/                  # ProductItem, ParsedPriceTag, UnitPrice, OcrFrame/OcrToken/OcrBox
+│       │   │   │   ├── model/                  # ProductItem, ParsedPriceTag, UnitPrice, UnitPriceSource, OcrFrame/OcrToken/OcrBox
 │       │   │   │   ├── parser/                 # OcrTokenMerger + PriceTagParser (чистый Kotlin)
-│       │   │   │   ├── pricing/                # UnitPriceCalculator, сравнение
+│       │   │   │   ├── pricing/                # UnitPriceCalculator, PriceSelection (меньшая из двух цен), сравнение
 │       │   │   │   ├── usecase/                # Recognize/Add/Remove/Compare use cases
 │       │   │   │   └── repository/             # интерфейс PriceTagRepository
 │       │   │   ├── data/

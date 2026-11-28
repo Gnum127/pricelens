@@ -17,8 +17,10 @@ internal fun ProductItem.toEntity(
     packageAmountLabel = packageAmountLabel,
     packageUnit = packageUnit,
     price = price,
+    priceByCard = priceByCard,
     unitPriceValue = unitPrice.value,
     unitPriceUnit = unitPrice.displayUnit,
+    unitPriceSource = unitPriceSource,
     sourceText = sourceText,
 )
 
@@ -29,6 +31,8 @@ internal fun ProductItemEntity.toDomain(): ProductItem = ProductItem(
     packageAmountLabel = packageAmountLabel,
     packageUnit = packageUnit,
     price = price,
+    priceByCard = priceByCard,
     unitPrice = UnitPrice(unitPriceValue, unitPriceUnit),
+    unitPriceSource = unitPriceSource,
     sourceText = sourceText,
 )

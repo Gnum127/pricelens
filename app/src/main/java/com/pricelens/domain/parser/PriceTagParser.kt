@@ -29,7 +29,18 @@ class PriceTagParser {
             }
         }
 
-        val searchable = maskUnitPricePhrases(normalized, explicitMatch?.range)
+        // Вторая цена ценника помечена «по карте» до или после числа. Её нельзя смешивать
+        // с обычной ценой и с ценой за единицу («цена за 1 кг»).
+        val cardMatch = cardPriceAfterRegex.find(normalized)
+            ?: cardPriceBeforeRegex.find(normalized)
+        val priceByCard = cardMatch?.groups["value"]?.value
+            ?.toBigDecimalOrNull()
+            ?.takeIf { it > BigDecimal.ZERO }
+
+        val searchable = maskUnitPricePhrases(
+            normalized,
+            listOfNotNull(explicitMatch?.range, cardMatch?.range),
+        )
         val rangeMatch = rangeAmountRegex.find(searchable)
         val amountMatch = if (rangeMatch != null) null else amountRegex.find(searchable)
         val amountRange = rangeMatch?.range ?: amountMatch?.range
@@ -39,6 +50,7 @@ class PriceTagParser {
                 name = explicitMatch?.let { extractName(rawText.substring(0, it.range.first)) },
                 explicitUnitPrice = price,
                 explicitUnitPriceUnit = explicitUnit ?: return null,
+                priceByCard = priceByCard,
                 sourceText = rawText,
             )
         }
@@ -72,6 +84,7 @@ class PriceTagParser {
             packageAmountLabel = amountLabel,
             packageUnit = packageUnit,
             price = price,
+            priceByCard = priceByCard,
             explicitUnitPrice = explicitUnitPrice,
             explicitUnitPriceUnit = explicitUnit,
             sourceText = rawText,
@@ -101,10 +114,10 @@ class PriceTagParser {
     private fun displayNumber(value: BigDecimal): String =
         value.stripTrailingZeros().toPlainString().replace('.', ',')
 
-    private fun maskUnitPricePhrases(text: String, fullMatchRange: IntRange?): String {
+    private fun maskUnitPricePhrases(text: String, maskedRanges: Collection<IntRange>): String {
         val chars = text.toCharArray()
         val ranges = buildList<IntRange> {
-            fullMatchRange?.let(::add)
+            addAll(maskedRanges)
             explicitPhraseRegex.findAll(text).forEach { add(it.range) }
         }
         ranges.forEach { range ->
@@ -135,6 +148,7 @@ class PriceTagParser {
             .replace(dateRegex, " ")
             .replace(longDigitRegex, " ")
             .replace(explicitPhraseRegex, " ")
+            .replace(cardLabelPhraseRegex, " ")
             .replace(priceWithCurrencyRegex, " ")
             .replace(numberRegex, " ")
 
@@ -163,6 +177,13 @@ class PriceTagParser {
         val priceWithCurrencyRegex = Regex(
             """(?iu)(\d+(?:\.\d+)?)[ \t]*(₽|руб\.?|р\.?|rub\.?|r\.?)(?!\p{L})""",
         )
+        val cardPriceAfterRegex = Regex(
+            """(?iu)(?<value>\d+(?:\.\d+)?)[ \t]*(?:₽|руб\.?|р\.?|rub\.?|r\.?)[ \t]*(?:цена[ \t]+)?по[ \t]+карте""",
+        )
+        val cardPriceBeforeRegex = Regex(
+            """(?iu)(?:цена[ \t]+)?по[ \t]+карте[^0-9\n]{0,40}(?<value>\d+(?:\.\d+)?)[ \t]*(?:₽|руб\.?|р\.?|rub\.?|r\.?)""",
+        )
+        val cardLabelPhraseRegex = Regex("""(?iu)(?:цена[ \t]+)?по[ \t]+карте""")
         val percentRegex = Regex("""\d+(?:\.\d+)?\s*%""")
         val rubleUnitRegex = Regex(
             """(?iu)(?<![\p{L}\d])(?:руб|py6|шт|wt|ut)(?![\p{L}\d])(?:\s*[./]\s*\S+)?""",

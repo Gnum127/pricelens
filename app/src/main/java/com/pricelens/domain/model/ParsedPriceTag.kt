@@ -9,6 +9,8 @@ data class ParsedPriceTag(
     val packageAmountLabel: String? = null,
     val packageUnit: WeightUnit? = null,
     val price: BigDecimal? = null,
+    /** Вторая цена ценника («по карте»); в сравнении участвует меньшая из двух. */
+    val priceByCard: BigDecimal? = null,
     val explicitUnitPrice: BigDecimal? = null,
     val explicitUnitPriceUnit: UnitPrice.Unit? = null,
     val sourceText: String? = null,

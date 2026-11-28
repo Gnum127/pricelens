@@ -32,6 +32,16 @@ class PriceTagRepositoryImplTest {
     }
 
     @Test
+    fun saveThenLoadPreservesCardPrice() = runBlocking {
+        val repository = PriceTagRepositoryImpl(dao, clock = { 1000L })
+        val items = listOf(item("card").copy(priceByCard = BigDecimal("243")))
+
+        repository.saveCurrent(items)
+
+        assertThat(repository.loadCurrent()).isEqualTo(items)
+    }
+
+    @Test
     fun firstSaveCreatesSessionWithBothTimestampsFromSingleClockRead() = runBlocking {
         val reads = AtomicInteger()
         val repository = PriceTagRepositoryImpl(dao, clock = { 1000L + reads.getAndIncrement() })

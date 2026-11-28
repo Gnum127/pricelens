@@ -7,6 +7,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -110,6 +111,16 @@ class PriceTagDaoAndroidTest {
     }
 
     @Test
+    fun preservesCardPrice() = runBlocking {
+        dao.upsertSession(session(100L, 100L))
+        val entity = entity(id = "card", position = 0).copy(priceByCard = BigDecimal("243"))
+
+        dao.upsertItems(listOf(entity))
+
+        assertEquals(entity, dao.getItems(CURRENT_SESSION_ID).single())
+    }
+
+    @Test
     fun migrationFromVersionOneAddsNullableLabelAndKeepsOldRows() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "pricelens-migration-${UUID.randomUUID()}"
@@ -118,12 +129,14 @@ class PriceTagDaoAndroidTest {
             createVersionOneDatabase(context, dbName)
             val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                 .allowMainThreadQueries()
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
             try {
                 val legacy = migrated.priceTagDao().getItems(CURRENT_SESSION_ID).single()
                 assertEquals("legacy", legacy.id)
                 assertNull(legacy.packageAmountLabel)
+                assertNull(legacy.priceByCard)
+                assertEquals(UnitPriceSource.PACKAGE, legacy.unitPriceSource)
                 assertEquals(BigDecimal("350"), legacy.packageAmount)
 
                 migrated.priceTagDao().upsertItems(
@@ -170,6 +183,89 @@ class PriceTagDaoAndroidTest {
                     "packageUnit, price, unitPriceValue, unitPriceUnit, sourceText) " +
                     "VALUES ('legacy', 'current', 0, 'Творог', '350', 'GRAM', '240.00', " +
                     "'685.71', 'KILOGRAM', '350 г 240 ₽')",
+            )
+        }
+        helper.close()
+    }
+
+    @Test
+    fun garbageUnitPriceSourceFallsBackToPackage() = runBlocking {
+        dao.upsertSession(session(100L, 100L))
+        database.openHelper.writableDatabase.execSQL(
+            "INSERT INTO product_item (id, sessionId, position, name, packageAmount, " +
+                "packageAmountLabel, packageUnit, price, priceByCard, unitPriceValue, " +
+                "unitPriceUnit, unitPriceSource, sourceText) " +
+                "VALUES ('bogus', 'current', 0, 'Творог', '350', NULL, 'GRAM', '240.00', " +
+                "NULL, '685.71', 'KILOGRAM', 'BOGUS', NULL)",
+        )
+
+        assertEquals(UnitPriceSource.PACKAGE, dao.getItems(CURRENT_SESSION_ID).single().unitPriceSource)
+    }
+
+    @Test
+    fun migrationFromVersionTwoAddsNullableCardPriceAndKeepsOldRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "pricelens-migration-v3-${UUID.randomUUID()}"
+        context.deleteDatabase(dbName)
+        try {
+            createVersionTwoDatabase(context, dbName)
+            val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+                .allowMainThreadQueries()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .build()
+            try {
+                val legacy = migrated.priceTagDao().getItems(CURRENT_SESSION_ID).single()
+                assertEquals("legacy", legacy.id)
+                assertNull(legacy.priceByCard)
+                assertEquals(UnitPriceSource.PACKAGE, legacy.unitPriceSource)
+                assertEquals("230-240 г", legacy.packageAmountLabel)
+                assertEquals(BigDecimal("240.00"), legacy.price)
+
+                migrated.priceTagDao().upsertItems(
+                    listOf(entity(id = "card", position = 1).copy(priceByCard = BigDecimal("243"))),
+                )
+                assertEquals(
+                    BigDecimal("243"),
+                    migrated.priceTagDao().getItems(CURRENT_SESSION_ID)
+                        .first { it.id == "card" }.priceByCard,
+                )
+            } finally {
+                migrated.close()
+            }
+        } finally {
+            context.deleteDatabase(dbName)
+        }
+    }
+
+    private fun createVersionTwoDatabase(context: Context, name: String) {
+        val helper = object : SQLiteOpenHelper(context, name, null, 2) {
+            override fun onCreate(db: SQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE comparison_session (id TEXT NOT NULL, createdAt INTEGER NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, PRIMARY KEY(id))",
+                )
+                db.execSQL(
+                    "CREATE TABLE product_item (id TEXT NOT NULL, sessionId TEXT NOT NULL, " +
+                        "position INTEGER NOT NULL, name TEXT NOT NULL, packageAmount TEXT, " +
+                        "packageAmountLabel TEXT, packageUnit TEXT, price TEXT, " +
+                        "unitPriceValue TEXT NOT NULL, unitPriceUnit TEXT NOT NULL, " +
+                        "sourceText TEXT, PRIMARY KEY(id), " +
+                        "FOREIGN KEY(sessionId) REFERENCES comparison_session(id) ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX index_product_item_sessionId ON product_item (sessionId)")
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        helper.writableDatabase.use { db ->
+            db.execSQL(
+                "INSERT INTO comparison_session (id, createdAt, updatedAt) VALUES ('current', 100, 100)",
+            )
+            db.execSQL(
+                "INSERT INTO product_item (id, sessionId, position, name, packageAmount, " +
+                    "packageAmountLabel, packageUnit, price, unitPriceValue, unitPriceUnit, sourceText) " +
+                    "VALUES ('legacy', 'current', 0, 'Творог', '350', '230-240 г', 'GRAM', " +
+                    "'240.00', '685.71', 'KILOGRAM', '350 г 240 ₽')",
             )
         }
         helper.close()

@@ -14,6 +14,10 @@
     <string name="name_label">Название</string>
     <string name="amount_label">Вес/объём</string>
     <string name="price_label">Цена, ₽</string>
+    <string name="price_by_card_label">По карте, ₽</string>
+    <string name="used_regular_price">В сравнении: обычная цена</string>
+    <string name="used_card_price">В сравнении: цена по карте</string>
+    <string name="used_explicit_price">В сравнении: цена за 1 кг/л с ценника</string>
     <string name="per_kilogram">₽/кг</string>
     <string name="per_liter">₽/л</string>
     <string name="best_price">Самая выгодная</string>
@@ -29,6 +33,6 @@
     <string name="error_permission">Без доступа к камере нельзя распознать ценник. Разрешите доступ в настройках приложения.</string>
     <string name="error_limit">Можно сравнить не более 5 товаров.</string>
     <string name="error_storage">Не удалось сохранить или загрузить товары.</string>
-    <string name="error_invalid_input">Проверьте вес/объём и цену.</string>
+    <string name="error_invalid_input">Проверьте вес/объём и цены.</string>
     <string name="unnamed_product">Товар</string>
 </resources>

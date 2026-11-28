@@ -8,6 +8,7 @@ import com.pricelens.domain.model.OcrResult
 import com.pricelens.domain.model.ParsedPriceTag
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.PriceTagRepository
@@ -115,8 +116,9 @@ class CompareViewModel @Inject constructor(
                 _uiState.update { it.copy(isPermissionDenied = true, isBusy = false) }
             }
             is UiAction.NameChanged -> changeName(action.id, action.value)
-            is UiAction.AmountChanged -> changeNumber(action.id, action.value, isAmount = true)
-            is UiAction.PriceChanged -> changeNumber(action.id, action.value, isAmount = false)
+            is UiAction.AmountChanged -> changeNumber(action.id, action.value, NumericField.AMOUNT)
+            is UiAction.PriceChanged -> changeNumber(action.id, action.value, NumericField.PRICE)
+            is UiAction.PriceByCardChanged -> changeNumber(action.id, action.value, NumericField.PRICE_BY_CARD)
             is UiAction.ItemRemoved -> removeItem(action.id)
         }
     }
@@ -177,26 +179,42 @@ class CompareViewModel @Inject constructor(
         }
     }
 
-    private fun changeNumber(id: String, value: String, isAmount: Boolean) {
+    private enum class NumericField { AMOUNT, PRICE, PRICE_BY_CARD }
+
+    private fun changeNumber(id: String, value: String, field: NumericField) {
         val state = _uiState.value
         val original = state.items.firstOrNull { it.id == id } ?: return
-        val draft = if (isAmount) {
-            (state.drafts[id] ?: original.toDraft()).copy(amount = value)
-        } else {
-            (state.drafts[id] ?: original.toDraft()).copy(price = value)
+        val baseDraft = state.drafts[id] ?: original.toDraft()
+        val draft = when (field) {
+            NumericField.AMOUNT -> baseDraft.copy(amount = value)
+            NumericField.PRICE -> baseDraft.copy(price = value)
+            NumericField.PRICE_BY_CARD -> baseDraft.copy(priceByCard = value)
         }
 
         // В поле amount изначально лежит подпись диапазона («230-240 г»): это не число,
         // но до первой правки веса расчёт должен идти от верхней границы диапазона.
-        val amount = if (draft.amount == original.packageAmountLabel) {
+        val amountDraft = if (draft.amount == original.packageAmountLabel) {
             original.packageAmount
         } else {
             draft.amount.toDecimal()
         }
-        val price = draft.price.toDecimal()
-        val changedValue = if (isAmount) draft.amount else draft.price
-        val parsedValue = if (isAmount) amount else price
-        val fieldKey = id + if (isAmount) ":amount" else ":price"
+        val priceDraft = draft.price.toDecimal()
+        val cardDraft = draft.priceByCard.toDecimal()
+        val changedValue = when (field) {
+            NumericField.AMOUNT -> draft.amount
+            NumericField.PRICE -> draft.price
+            NumericField.PRICE_BY_CARD -> draft.priceByCard
+        }
+        val parsedValue = when (field) {
+            NumericField.AMOUNT -> amountDraft
+            NumericField.PRICE -> priceDraft
+            NumericField.PRICE_BY_CARD -> cardDraft
+        }
+        val fieldKey = id + when (field) {
+            NumericField.AMOUNT -> ":amount"
+            NumericField.PRICE -> ":price"
+            NumericField.PRICE_BY_CARD -> ":priceByCard"
+        }
         val isInvalid = changedValue.isNotBlank() &&
             (parsedValue == null || parsedValue <= BigDecimal.ZERO)
         if (isInvalid) {
@@ -204,24 +222,50 @@ class CompareViewModel @Inject constructor(
         } else {
             invalidFields.remove(fieldKey)
         }
-        val unitPrice = if (amount != null && price != null && original.packageUnit != null) {
+        // Невалидная правка не портит товар, но остальные поля всё равно применяются:
+        // после «abc» в обычной цене можно исправить цену по карте, не теряя 270 ₽.
+        if (isInvalid) {
+            _uiState.update { current ->
+                current.copy(
+                    drafts = current.drafts + (id to draft),
+                    cheapestId = compareItems(current.items).cheapestId,
+                )
+            }
+            return
+        }
+        // Невалидный черновик другого поля подменяется сохранённым значением, а не null.
+        // Намеренно очищенное редактируемое поле цены, наоборот, удаляет цену.
+        val amount = amountDraft?.takeIf { it > BigDecimal.ZERO } ?: original.packageAmount
+        val price = when {
+            field == NumericField.PRICE && draft.price.isBlank() -> null
+            else -> priceDraft?.takeIf { it > BigDecimal.ZERO } ?: original.price
+        }
+        val priceByCard = when {
+            field == NumericField.PRICE_BY_CARD && draft.priceByCard.isBlank() -> null
+            else -> cardDraft?.takeIf { it > BigDecimal.ZERO } ?: original.priceByCard
+        }
+        val unitPrice = if (original.unitPriceSource == UnitPriceSource.EXPLICIT) {
+            // Явная цена за 1 кг/л с ценника авторитетнее пересчёта из упаковки.
+            original.unitPrice
+        } else if (amount != null && original.packageUnit != null) {
             calculator.calculate(
                 ParsedPriceTag(
                     packageAmount = amount,
                     packageUnit = original.packageUnit,
                     price = price,
+                    priceByCard = priceByCard,
                 ),
             )
         } else {
             null
         }
-        // Невалидная или незавершённая правка не портит сохранённый товар.
         val updated = unitPrice?.let {
             original.copy(
                 packageAmount = amount,
                 // Подпись диапазона сбрасывает только ручная правка веса.
-                packageAmountLabel = if (isAmount) null else original.packageAmountLabel,
+                packageAmountLabel = if (field == NumericField.AMOUNT) null else original.packageAmountLabel,
                 price = price,
+                priceByCard = priceByCard,
                 unitPrice = it,
             )
         }
@@ -239,6 +283,7 @@ class CompareViewModel @Inject constructor(
     private fun removeItem(id: String) {
         invalidFields.remove("$id:amount")
         invalidFields.remove("$id:price")
+        invalidFields.remove("$id:priceByCard")
         _uiState.update { state ->
             val items = removeItemUseCase(state.items, id)
             state.copy(
@@ -271,7 +316,13 @@ class CompareViewModel @Inject constructor(
                 null -> parsed.packageUnit
             },
             price = explicitPrice ?: parsed.price,
+            priceByCard = parsed.priceByCard,
             unitPrice = unitPrice,
+            unitPriceSource = if (explicitPrice != null && explicitUnit != null) {
+                UnitPriceSource.EXPLICIT
+            } else {
+                UnitPriceSource.PACKAGE
+            },
             sourceText = parsed.sourceText,
         )
     }
@@ -280,6 +331,7 @@ class CompareViewModel @Inject constructor(
         name = name,
         amount = packageAmountLabel ?: packageAmount?.let(::formatAmount).orEmpty(),
         price = price?.let(::formatMoney).orEmpty(),
+        priceByCard = priceByCard?.let(::formatMoney).orEmpty(),
     )
 
     private fun String.toDecimal(): BigDecimal? =
@@ -289,5 +341,5 @@ class CompareViewModel @Inject constructor(
         map { if (it.id == id) transform(it) else it }
 
     private fun Map<String, ItemDraft>.with(id: String, transform: (ItemDraft) -> ItemDraft) =
-        this + (id to transform(this[id] ?: ItemDraft("", "", "")))
+        this + (id to transform(this[id] ?: ItemDraft("", "", "", "")))
 }

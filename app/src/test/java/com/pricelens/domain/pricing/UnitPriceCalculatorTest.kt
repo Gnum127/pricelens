@@ -58,6 +58,82 @@ class UnitPriceCalculatorTest {
     }
 
     @Test
+    fun usesLowerOfTwoPrices() {
+        val parsed = ParsedPriceTag(
+            packageAmount = BigDecimal("200"),
+            packageUnit = WeightUnit.GRAM,
+            price = BigDecimal("270"),
+            priceByCard = BigDecimal("243"),
+        )
+
+        val result = calculator.calculate(parsed)
+
+        assertThat(result).isNotNull()
+        assertDecimal(result!!.value, "1215.00")
+        assertThat(isCardPriceUsed(parsed.price, parsed.priceByCard)).isTrue()
+    }
+
+    @Test
+    fun regularPriceIsUsedWhenCardPriceIsMissingOrWorse() {
+        val withoutCard = ParsedPriceTag(
+            packageAmount = BigDecimal("200"),
+            packageUnit = WeightUnit.GRAM,
+            price = BigDecimal("270"),
+        )
+        val worseCard = withoutCard.copy(priceByCard = BigDecimal("280"))
+        val equalCard = withoutCard.copy(priceByCard = BigDecimal("270.00"))
+
+        assertDecimal(calculator.calculate(withoutCard)!!.value, "1350.00")
+        assertDecimal(calculator.calculate(worseCard)!!.value, "1350.00")
+        assertDecimal(calculator.calculate(equalCard)!!.value, "1350.00")
+        assertThat(isCardPriceUsed(equalCard.price, equalCard.priceByCard)).isFalse()
+    }
+
+    @Test
+    fun nonPositiveCardPriceIsIgnored() {
+        val parsed = ParsedPriceTag(
+            packageAmount = BigDecimal("200"),
+            packageUnit = WeightUnit.GRAM,
+            price = BigDecimal("270"),
+            priceByCard = BigDecimal.ZERO,
+        )
+
+        assertDecimal(calculator.calculate(parsed)!!.value, "1350.00")
+        assertThat(isCardPriceUsed(parsed.price, parsed.priceByCard)).isFalse()
+    }
+
+    @Test
+    fun cardPriceAloneIsEnoughForCalculation() {
+        val parsed = ParsedPriceTag(
+            packageAmount = BigDecimal("200"),
+            packageUnit = WeightUnit.GRAM,
+            price = null,
+            priceByCard = BigDecimal("243"),
+        )
+
+        assertDecimal(calculator.calculate(parsed)!!.value, "1215.00")
+        assertThat(isCardPriceUsed(parsed.price, parsed.priceByCard)).isTrue()
+    }
+
+    @Test
+    fun explicitUnitPriceWinsOverLowerCardPrice() {
+        val parsed = ParsedPriceTag(
+            packageAmount = BigDecimal("350"),
+            packageUnit = WeightUnit.GRAM,
+            price = BigDecimal("240"),
+            priceByCard = BigDecimal("200"),
+            explicitUnitPrice = BigDecimal("685.71"),
+            explicitUnitPriceUnit = UnitPrice.Unit.KILOGRAM,
+        )
+
+        val result = calculator.calculate(parsed)
+
+        assertThat(result).isNotNull()
+        assertThat(result!!.displayUnit).isEqualTo(UnitPrice.Unit.KILOGRAM)
+        assertDecimal(result.value, "685.71")
+    }
+
+    @Test
     fun prefersExplicitUnitPriceAndNormalizesScale() {
         val parsed = ParsedPriceTag(
             packageAmount = BigDecimal("350"),

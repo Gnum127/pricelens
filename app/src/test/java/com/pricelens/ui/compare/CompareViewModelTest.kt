@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.RawTextResult
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.domain.parser.OcrTokenMerger
 import com.pricelens.domain.parser.PriceTagParser
@@ -105,8 +106,9 @@ class CompareViewModelTest {
 
         viewModel.onAction(UiAction.AmountChanged(item.id, "700"))
 
+        // Явная цена за 1 кг остаётся авторитетной: пересчёт из веса её не заменяет.
         assertThat(
-            viewModel.uiState.value.items.single().unitPrice.value.compareTo(BigDecimal("979.59")),
+            viewModel.uiState.value.items.single().unitPrice.value.compareTo(BigDecimal("685.71")),
         ).isEqualTo(0)
     }
 
@@ -126,9 +128,12 @@ class CompareViewModelTest {
 
         viewModel.onAction(UiAction.AmountChanged(item.id, "800"))
 
+        // Явная цена за 1 л остаётся авторитетной: пересчёт из объёма её не заменяет.
         assertThat(
-            viewModel.uiState.value.items.single().unitPrice.value.compareTo(BigDecimal("162.38")),
+            viewModel.uiState.value.items.single().unitPrice.value.compareTo(BigDecimal("129.90")),
         ).isEqualTo(0)
+        assertThat(viewModel.uiState.value.items.single().unitPriceSource)
+            .isEqualTo(UnitPriceSource.EXPLICIT)
     }
 
     @Test
@@ -266,6 +271,252 @@ class CompareViewModelTest {
             viewModel.uiState.value.items.first { it.id == firstId }
                 .unitPrice.value.compareTo(BigDecimal("571.43")),
         ).isEqualTo(0)
+    }
+
+    @Test
+    fun twoPricesAreRecognizedAndBothDraftsAreEditable() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+        val item = viewModel.uiState.value.items.single()
+
+        assertDecimal(item.price, "270")
+        assertDecimal(item.priceByCard, "243")
+        assertDecimal(item.unitPrice.value, "1215.00")
+        assertThat(viewModel.uiState.value.drafts[id]?.priceByCard).isEqualTo("243,00")
+
+        viewModel.onAction(UiAction.PriceByCardChanged(id, "253"))
+
+        assertDecimal(viewModel.uiState.value.items.single().priceByCard, "253")
+        assertDecimal(viewModel.uiState.value.items.single().unitPrice.value, "1265.00")
+        assertThat(viewModel.uiState.value.drafts[id]?.priceByCard).isEqualTo("253")
+    }
+
+    @Test
+    fun editingRegularPriceDoesNotOverrideLowerCardPrice() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceChanged(id, "250"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.price, "250")
+        assertDecimal(item.priceByCard, "243")
+        assertDecimal(item.unitPrice.value, "1215.00")
+    }
+
+    @Test
+    fun invalidCardPriceDoesNotChangeItem() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val item = viewModel.uiState.value.items.single()
+
+        val event = expectMessage(viewModel) {
+            viewModel.onAction(UiAction.PriceByCardChanged(item.id, "abc"))
+        }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
+        assertThat(viewModel.uiState.value.items.single()).isEqualTo(item)
+        assertThat(viewModel.uiState.value.drafts[item.id]?.priceByCard).isEqualTo("abc")
+    }
+
+    @Test
+    fun explicitUnitPriceSurvivesManualEdits() {
+        provider.result = textResult("цена за 1 кг: 685,71 ₽\n350 г 240 ₽")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceChanged(id, "200"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.unitPrice.value, "685.71")
+        assertThat(item.unitPriceSource).isEqualTo(UnitPriceSource.EXPLICIT)
+        assertDecimal(item.price, "200")
+    }
+
+    @Test
+    fun clearingCardPriceRemovesItAndRecalculatesFromRegularPrice() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceByCardChanged(id, ""))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.price, "270")
+        assertThat(item.priceByCard).isNull()
+        assertDecimal(item.unitPrice.value, "1350.00")
+    }
+
+    @Test
+    fun clearingRegularPriceKeepsCardPriceForComparison() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceChanged(id, ""))
+
+        val item = viewModel.uiState.value.items.single()
+        assertThat(item.price).isNull()
+        assertDecimal(item.priceByCard, "243")
+        assertDecimal(item.unitPrice.value, "1215.00")
+    }
+
+    @Test
+    fun invalidDraftInAnotherFieldDoesNotEraseValidPrice() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+        viewModel.onAction(UiAction.PriceChanged(id, "abc"))
+
+        viewModel.onAction(UiAction.PriceByCardChanged(id, "253"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.price, "270")
+        assertDecimal(item.priceByCard, "253")
+        assertDecimal(item.unitPrice.value, "1265.00")
+    }
+
+    @Test
+    fun cheapestIdFollowsCardPriceEditAndItsClearing() {
+        repository.items = listOf(
+            product("a", "Печенье A", "200", "270", "1350.00"),
+            product("b", "Печенье B", "200", "260", "1300.00"),
+        )
+        val viewModel = viewModel()
+        assertThat(viewModel.uiState.value.cheapestId).isEqualTo("b")
+
+        viewModel.onAction(UiAction.PriceByCardChanged("a", "240"))
+        assertThat(viewModel.uiState.value.cheapestId).isEqualTo("a")
+
+        viewModel.onAction(UiAction.PriceByCardChanged("a", ""))
+        assertThat(viewModel.uiState.value.cheapestId).isEqualTo("b")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["0", "-1", "."])
+    fun invalidCardPriceIsRejected(value: String) {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val item = viewModel.uiState.value.items.single()
+
+        val event = expectMessage(viewModel) {
+            viewModel.onAction(UiAction.PriceByCardChanged(item.id, value))
+        }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
+        assertThat(viewModel.uiState.value.items.single()).isEqualTo(item)
+        assertThat(viewModel.uiState.value.drafts[item.id]?.priceByCard).isEqualTo(value)
+    }
+
+    @Test
+    fun invalidInputIsReportedForRegularAndCardPriceSeparately() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        val messages = messagesDuring(viewModel) {
+            viewModel.onAction(UiAction.PriceChanged(id, "abc"))
+            viewModel.onAction(UiAction.PriceByCardChanged(id, "abc"))
+        }
+
+        assertThat(messages).containsExactly(
+            UiEvent.Message(CompareMessage.InvalidInput),
+            UiEvent.Message(CompareMessage.InvalidInput),
+        )
+    }
+
+    @Test
+    fun invalidCardKeyIsClearedWhenItemIsRemoved() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val firstId = viewModel.uiState.value.items.single().id
+        viewModel.onAction(UiAction.PriceByCardChanged(firstId, "abc"))
+        viewModel.onAction(UiAction.ItemRemoved(firstId))
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val secondId = viewModel.uiState.value.items.single().id
+
+        val event = expectMessage(viewModel) {
+            viewModel.onAction(UiAction.PriceByCardChanged(secondId, "abc"))
+        }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
+    }
+
+    @Test
+    fun clearingLastRemainingPriceKeepsComparisonStable() {
+        provider.result = textResult("200 г 270 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceByCardChanged(id, ""))
+        val afterCard = viewModel.uiState.value.items.single()
+        assertThat(afterCard.priceByCard).isNull()
+        assertDecimal(afterCard.price, "270")
+        assertDecimal(afterCard.unitPrice.value, "1350.00")
+
+        // Без хотя бы одной цены цена за единицу недоступна, поэтому последняя цена не удаляется.
+        viewModel.onAction(UiAction.PriceChanged(id, ""))
+        val afterBoth = viewModel.uiState.value.items.single()
+        assertDecimal(afterBoth.price, "270")
+        assertThat(afterBoth.priceByCard).isNull()
+        assertDecimal(afterBoth.unitPrice.value, "1350.00")
+    }
+
+    @Test
+    fun explicitPriceSourceSurvivesReloadAndCardEdit() {
+        repository.items = listOf(
+            product("a", "Творог", "350", "240", "685.71")
+                .copy(unitPriceSource = UnitPriceSource.EXPLICIT, priceByCard = BigDecimal("200")),
+        )
+        val viewModel = viewModel()
+
+        viewModel.onAction(UiAction.PriceByCardChanged("a", "190"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.unitPrice.value, "685.71")
+        assertThat(item.unitPriceSource).isEqualTo(UnitPriceSource.EXPLICIT)
+        assertDecimal(item.priceByCard, "190")
+    }
+
+    @Test
+    fun explicitPriceFromRecognitionIsNotRecalculatedAfterCardEdit() {
+        provider.result = textResult("цена за 1 кг: 685,71 ₽\n350 г 240 ₽ 243 ₽ по карте")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        val id = viewModel.uiState.value.items.single().id
+
+        viewModel.onAction(UiAction.PriceByCardChanged(id, "200"))
+
+        val item = viewModel.uiState.value.items.single()
+        assertDecimal(item.unitPrice.value, "685.71")
+        assertThat(item.unitPriceSource).isEqualTo(UnitPriceSource.EXPLICIT)
+        assertDecimal(item.priceByCard, "200")
     }
 
     @Test

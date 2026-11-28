@@ -152,6 +152,79 @@ class PriceTagParserTest {
     }
 
     @Test
+    fun parsesTwoPricesWithCardDiscount() {
+        val parsed = parser.parse("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ\n200 г\n270 ₽\n243 ₽ по карте")
+
+        assertThat(parsed).isNotNull()
+        parsed!!.let {
+            assertThat(it.name).isEqualTo("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ")
+            assertDecimal(it.packageAmount, "200")
+            assertDecimal(it.price, "270")
+            assertDecimal(it.priceByCard, "243")
+            assertThat(it.explicitUnitPrice).isNull()
+        }
+    }
+
+    @Test
+    fun parsesCardPriceBeforeNumberAndKeepsItOutOfName() {
+        val parsed = parser.parse("Печенье\n200 г\nцена по карте 243 ₽\n270 ₽")
+
+        assertThat(parsed).isNotNull()
+        parsed!!.let {
+            assertThat(it.name).isEqualTo("Печенье")
+            assertDecimal(it.price, "270")
+            assertDecimal(it.priceByCard, "243")
+        }
+    }
+
+    @Test
+    fun cardPriceIsNotConfusedWithExplicitUnitPrice() {
+        val parsed = parser.parse("350 г\n240 ₽\nцена по карте 200 ₽\nцена за 1 кг: 685,71 ₽")
+
+        assertThat(parsed).isNotNull()
+        parsed!!.let {
+            assertDecimal(it.price, "240")
+            assertDecimal(it.priceByCard, "200")
+            assertDecimal(it.explicitUnitPrice, "685.71")
+        }
+    }
+
+    @Test
+    fun parsesFractionalCardPriceInBothFormats() {
+        val after = parser.parse("Печенье\n200 г\n270 ₽\n243,50 ₽ по карте")
+        val before = parser.parse("Печенье\n200 г\n270 ₽\nцена по карте 243,50 руб.")
+
+        assertThat(after).isNotNull()
+        assertDecimal(after!!.priceByCard, "243.50")
+        assertDecimal(after.price, "270")
+        assertThat(before).isNotNull()
+        assertDecimal(before!!.priceByCard, "243.50")
+        assertDecimal(before.price, "270")
+    }
+
+    @Test
+    fun zeroCardPriceIsIgnored() {
+        val parsed = parser.parse("Печенье\n200 г\n270 ₽\n0 ₽ по карте")
+
+        assertThat(parsed).isNotNull()
+        assertDecimal(parsed!!.price, "270")
+        assertThat(parsed.priceByCard).isNull()
+    }
+
+    @Test
+    fun cardPriceWithOnlyExplicitUnitPriceIsKeptOutOfName() {
+        val parsed = parser.parse("243 ₽ по карте\nцена за 1 кг: 685,71 ₽")
+
+        assertThat(parsed).isNotNull()
+        parsed!!.let {
+            assertDecimal(it.explicitUnitPrice, "685.71")
+            assertDecimal(it.priceByCard, "243")
+            assertThat(it.explicitUnitPriceUnit).isEqualTo(UnitPrice.Unit.KILOGRAM)
+            assertThat(it.name.isNullOrEmpty()).isTrue()
+        }
+    }
+
+    @Test
     fun returnsNullWhenPriceIsMissing() {
         assertThat(parser.parse("Творог 5% 350 г")).isNull()
     }
