@@ -1,5 +1,6 @@
 package com.pricelens.ui.compare
 
+import com.pricelens.domain.model.ManualUnit
 import com.pricelens.domain.model.ProductItem
 
 data class ItemDraft(
@@ -13,6 +14,7 @@ enum class ManualField { NAME, AMOUNT, PRICE, PRICE_BY_CARD }
 
 data class ManualEntryState(
     val draft: ItemDraft = ItemDraft("", "", "", ""),
+    val unit: ManualUnit = ManualUnit.GRAM,
     /** Диалог открыт после неудачного распознавания: пользователю предлагают ввести данные. */
     val recognitionFailed: Boolean = false,
 )
@@ -41,7 +43,9 @@ sealed interface UiAction {
     data object AddClicked : UiAction
     data object ManualEntryClicked : UiAction
     data class ManualFieldChanged(val field: ManualField, val value: String) : UiAction
+    data class ManualUnitChanged(val unit: ManualUnit) : UiAction
     data object ManualEntrySubmitted : UiAction
+    data object ClearAll : UiAction
     data object ManualEntryDismissed : UiAction
     data object CaptureDismissed : UiAction
     data object CameraBindFailed : UiAction

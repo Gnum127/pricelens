@@ -1,5 +1,6 @@
 package com.pricelens.core.design
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Column
@@ -15,13 +16,41 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.pricelens.R
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.pricing.isCardPriceUsed
+
+/** Параметры контура лучшей карточки вынесены, чтобы их можно было проверить тестом. */
+internal data class BestCardOutlineSpec(val widthDp: Int, val colorRes: Int)
+
+internal object BestCardOutline {
+    const val WIDTH_DP = 2
+    val COLOR_RES: Int = R.color.price_lens_primary
+    val spec = BestCardOutlineSpec(WIDTH_DP, COLOR_RES)
+}
+
+internal val BestCardOutlineKey = SemanticsPropertyKey<BestCardOutlineSpec>("BestCardOutline")
+
+/** Контур рисуется и одновременно публикует свои параметры в семантике для UI-тестов. */
+@Composable
+internal fun Modifier.bestCardOutline(isBest: Boolean): Modifier {
+    if (!isBest) return this
+    return this
+        .border(
+            width = BestCardOutline.WIDTH_DP.dp,
+            color = colorResource(BestCardOutline.COLOR_RES),
+            shape = MaterialTheme.shapes.medium,
+        )
+        .semantics { this[BestCardOutlineKey] = BestCardOutline.spec }
+}
 
 @Composable
 fun PriceCard(
@@ -40,7 +69,10 @@ fun PriceCard(
     modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .bestCardOutline(isBest)
+            .then(if (isBest) Modifier.testTag("best_card") else Modifier),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {

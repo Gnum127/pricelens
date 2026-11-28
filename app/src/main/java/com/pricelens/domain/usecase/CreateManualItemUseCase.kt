@@ -26,7 +26,7 @@ class CreateManualItemUseCase(
         val priceByCard = if (regular != null) card else null
         // Название не идёт в парсер: числа в нём («Молоко 1 л») не должны подменять вес упаковки.
         val rawText = buildList {
-            add(input.amount.trim())
+            add("${input.amount.trim()} ${input.unit.symbol}")
             add("$price ₽")
             if (priceByCard != null) add("$priceByCard ₽ по карте")
         }.filter { it.isNotBlank() }.joinToString("\n")

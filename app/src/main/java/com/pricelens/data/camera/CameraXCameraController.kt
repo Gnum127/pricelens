@@ -1,8 +1,6 @@
 package com.pricelens.data.camera
 
 import android.content.Context
-import android.os.Build
-import android.view.WindowManager
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -36,10 +34,7 @@ class CameraXCameraController(private val context: Context) : CameraController {
             ProcessCameraProvider.getInstance(context).get()
         }
         val preview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
-        val capture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setTargetRotation(displayRotation())
-            .build()
+        val capture = createImageCapture(view)
 
         provider.unbindAll()
         camera = provider.bindToLifecycle(
@@ -109,16 +104,22 @@ class CameraXCameraController(private val context: Context) : CameraController {
         previewView = null
     }
 
-    @Suppress("DEPRECATION")
-    private fun displayRotation(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.display?.rotation ?: 0
-        } else {
-            (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                .defaultDisplay.rotation
-        }
-
     private companion object {
         const val FOCUS_TIMEOUT_MS = 500L
     }
 }
+
+/**
+ * Поворот берётся только у PreviewView: у application-контекста `context.display` на Android 11+
+ * может бросить UnsupportedOperationException и сорвать открытие камеры.
+ * Функция вынесена из bind, чтобы конфигурацию можно было проверить без реальной камеры.
+ */
+internal fun createImageCapture(view: PreviewView): ImageCapture =
+    ImageCapture.Builder()
+        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+        .setTargetRotation(safeDisplayRotation { view.display?.rotation })
+        .build()
+
+/** Чтение поворота экрана не должно срывать bind, если view ещё не привязана к дисплею. */
+internal fun safeDisplayRotation(read: () -> Int?): Int =
+    runCatching(read).getOrNull() ?: 0

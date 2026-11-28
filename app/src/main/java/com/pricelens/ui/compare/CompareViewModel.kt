@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.pricelens.core.util.formatAmount
 import com.pricelens.core.util.formatMoney
 import com.pricelens.domain.model.ManualEntryInput
+import com.pricelens.domain.model.ManualUnit
 import com.pricelens.domain.model.OcrResult
 import com.pricelens.domain.model.ParsedPriceTag
 import com.pricelens.domain.model.ProductItem
@@ -108,10 +109,15 @@ class CompareViewModel @Inject constructor(
             UiAction.ManualEntryClicked -> openManualEntry(recognitionFailed = false)
             is UiAction.ManualFieldChanged -> _uiState.update { state ->
                 val entry = state.manualEntry ?: return@update state
-                state.copy(manualEntry = entry.copy(draft = entry.draft.with(action.field, action.value)))
+                val value = if (action.field == ManualField.AMOUNT) sanitizeAmount(action.value) else action.value
+                state.copy(manualEntry = entry.copy(draft = entry.draft.with(action.field, value)))
+            }
+            is UiAction.ManualUnitChanged -> _uiState.update { state ->
+                state.copy(manualEntry = state.manualEntry?.copy(unit = action.unit))
             }
             UiAction.ManualEntrySubmitted -> submitManualEntry()
             UiAction.ManualEntryDismissed -> _uiState.update { it.copy(manualEntry = null) }
+            UiAction.ClearAll -> clearAll()
             UiAction.CaptureDismissed -> _uiState.update {
                 it.copy(isCaptureOpen = false, isPermissionDenied = false)
             }
@@ -197,13 +203,48 @@ class CompareViewModel @Inject constructor(
             send(CompareMessage.LimitReached)
             return
         }
-        _uiState.update { it.copy(manualEntry = ManualEntryState(recognitionFailed = recognitionFailed)) }
+        _uiState.update {
+            it.copy(manualEntry = ManualEntryState(recognitionFailed = recognitionFailed))
+        }
+    }
+
+    private fun clearAll() {
+        captureJob?.cancel()
+        captureJob = null
+        _uiState.update {
+            it.copy(
+                items = emptyList(),
+                drafts = emptyMap(),
+                cheapestId = null,
+                isCaptureOpen = false,
+                isBusy = false,
+                isPermissionDenied = false,
+                manualEntry = null,
+            )
+        }
+    }
+
+    /** Поле количества: только цифры и один десятичный разделитель, без единиц измерения. */
+    private fun sanitizeAmount(value: String): String {
+        val filtered = value.filter { it.isDigit() || it == ',' || it == '.' }
+        var separatorSeen = false
+        return buildString {
+            filtered.forEach { char ->
+                when (char) {
+                    ',', '.' -> if (!separatorSeen) {
+                        append(',')
+                        separatorSeen = true
+                    }
+                    else -> append(char)
+                }
+            }
+        }
     }
 
     private fun submitManualEntry() {
         val state = _uiState.value
-        val draft = state.manualEntry?.draft ?: return
-        val item = createManualItem(UUID.randomUUID().toString(), draft.toInput())
+        val entry = state.manualEntry ?: return
+        val item = createManualItem(UUID.randomUUID().toString(), entry.toInput())
         if (item == null) {
             send(CompareMessage.InvalidInput)
             return
@@ -410,5 +451,11 @@ class CompareViewModel @Inject constructor(
         ManualField.PRICE_BY_CARD -> copy(priceByCard = value)
     }
 
-    private fun ItemDraft.toInput() = ManualEntryInput(name, amount, price, priceByCard)
+    private fun ManualEntryState.toInput() = ManualEntryInput(
+        name = draft.name,
+        amount = draft.amount,
+        unit = unit,
+        price = draft.price,
+        priceByCard = draft.priceByCard,
+    )
 }
