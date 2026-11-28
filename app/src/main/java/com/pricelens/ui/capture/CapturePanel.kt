@@ -70,7 +70,7 @@ fun CapturePanel(
     if (permissionGranted) {
         LaunchedEffect(previewView, lifecycleOwner) {
             previewView?.let { view ->
-                runCatching { cameraController.bind(lifecycleOwner, view.surfaceProvider) }
+                runCatching { cameraController.bind(lifecycleOwner, view) }
                     .onFailure { failure ->
                         if (failure is CancellationException) throw failure
                         onCameraError()
@@ -135,6 +135,11 @@ fun CapturePanel(
         )
         Text(
             text = stringResource(R.string.glare_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.monitor_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -9,6 +9,14 @@ data class ItemDraft(
     val priceByCard: String = "",
 )
 
+enum class ManualField { NAME, AMOUNT, PRICE, PRICE_BY_CARD }
+
+data class ManualEntryState(
+    val draft: ItemDraft = ItemDraft("", "", "", ""),
+    /** Диалог открыт после неудачного распознавания: пользователю предлагают ввести данные. */
+    val recognitionFailed: Boolean = false,
+)
+
 data class CompareUiState(
     val items: List<ProductItem> = emptyList(),
     val drafts: Map<String, ItemDraft> = emptyMap(),
@@ -17,12 +25,10 @@ data class CompareUiState(
     val isPermissionDenied: Boolean = false,
     val isBusy: Boolean = false,
     val isLoading: Boolean = true,
-    val isPersistenceAvailable: Boolean = true,
+    val manualEntry: ManualEntryState? = null,
 )
 
 sealed interface CompareMessage {
-    data object EmptyText : CompareMessage
-    data class Unparseable(val rawText: String) : CompareMessage
     data object CameraError : CompareMessage
     data object OcrEngineError : CompareMessage
     data object PermissionDenied : CompareMessage
@@ -33,6 +39,10 @@ sealed interface CompareMessage {
 
 sealed interface UiAction {
     data object AddClicked : UiAction
+    data object ManualEntryClicked : UiAction
+    data class ManualFieldChanged(val field: ManualField, val value: String) : UiAction
+    data object ManualEntrySubmitted : UiAction
+    data object ManualEntryDismissed : UiAction
     data object CaptureDismissed : UiAction
     data object CameraBindFailed : UiAction
     data object CaptureConfirmed : UiAction

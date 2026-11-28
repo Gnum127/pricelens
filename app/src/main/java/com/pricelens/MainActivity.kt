@@ -61,8 +61,6 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun Context.messageFor(message: CompareMessage): String = when (message) {
-    CompareMessage.EmptyText -> getString(R.string.error_empty_text)
-    is CompareMessage.Unparseable -> getString(R.string.error_unparseable)
     CompareMessage.CameraError -> getString(R.string.error_camera)
     CompareMessage.OcrEngineError -> getString(R.string.error_ocr_engine)
     CompareMessage.PermissionDenied -> getString(R.string.error_permission)

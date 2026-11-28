@@ -7,9 +7,8 @@ import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.ImageProxy
 import androidx.core.app.ActivityOptionsCompat
-import androidx.camera.core.Preview
+import androidx.camera.view.PreviewView
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -24,6 +23,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
@@ -39,6 +39,7 @@ import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.ui.capture.CapturePanel
+import java.io.File
 import java.math.BigDecimal
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -52,16 +53,17 @@ class CompareScreenTest {
     val composeTestRule = createAndroidComposeRule<ComponentActivity>()
 
     @Test
-    fun loadingStateHidesSummaryAndDisablesAdd() {
+    fun loadingStateHidesSummaryAndDisablesBothEntryButtons() {
         renderCompare(CompareUiState(isLoading = true))
 
         composeTestRule.onNodeWithText(text(R.string.loading)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(text(R.string.summary_title)).assertIsNotDisplayed()
-        composeTestRule.onNodeWithText(text(R.string.add_item)).assertHasNoClickAction()
+        composeTestRule.onNodeWithText(text(R.string.best_price)).assertIsNotDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.scan_price_tag)).assertHasNoClickAction()
+        composeTestRule.onNodeWithText(text(R.string.add_manually)).assertHasNoClickAction()
     }
 
     @Test
-    fun loadedStateShowsBestItemAndEnablesAdd() {
+    fun loadedStateShowsBestItemAndEnablesBothEntryButtons() {
         renderCompare(
             CompareUiState(
                 items = listOf(
@@ -74,23 +76,89 @@ class CompareScreenTest {
         )
 
         composeTestRule.onNodeWithText(text(R.string.loading)).assertIsNotDisplayed()
-        composeTestRule.onNodeWithText(text(R.string.summary_title)).assertIsDisplayed()
         composeTestRule.onNodeWithText(
             text(R.string.summary_best, "Творог 5%", "662,50 " + text(R.string.per_kilogram)),
         ).assertIsDisplayed()
         composeTestRule.onNodeWithText(text(R.string.best_price)).assertIsDisplayed()
+        // Регрессия: заголовок плашки удалён, остаётся только сообщение сводки.
+        composeTestRule.onAllNodesWithText("Итог").assertCountEquals(0)
         composeTestRule.onNodeWithText(text(R.string.error_storage)).assertIsNotDisplayed()
-        composeTestRule.onNodeWithText(text(R.string.add_item)).assertHasClickAction()
+        composeTestRule.onNodeWithText(text(R.string.scan_price_tag)).assertHasClickAction()
+        composeTestRule.onNodeWithText(text(R.string.add_manually)).assertHasClickAction()
     }
 
     @Test
-    fun addTileClickSendsAddAction() {
+    fun entryButtonsSendTheirActions() {
         val actions = mutableListOf<UiAction>()
         renderCompare(CompareUiState(isLoading = false), onAction = actions::add)
 
-        composeTestRule.onNodeWithText(text(R.string.add_item)).performClick()
+        composeTestRule.onNodeWithText(text(R.string.scan_price_tag)).performClick()
+        composeTestRule.onNodeWithText(text(R.string.add_manually)).performClick()
 
-        assertEquals(listOf(UiAction.AddClicked), actions)
+        assertEquals(listOf(UiAction.AddClicked, UiAction.ManualEntryClicked), actions)
+    }
+
+    @Test
+    fun manualDialogShowsAllFieldsAndSendsValues() {
+        val actions = mutableListOf<UiAction>()
+        renderCompare(
+            CompareUiState(
+                isLoading = false,
+                manualEntry = ManualEntryState(ItemDraft("", "", "", "")),
+            ),
+            onAction = actions::add,
+        )
+
+        composeTestRule.onNodeWithText(text(R.string.manual_entry_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.name_label)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.amount_label)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.price_label)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.price_by_card_label)).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("manual_name").performTextReplacement("Творог")
+        composeTestRule.onNodeWithTag("manual_amount").performTextReplacement("350 г")
+        composeTestRule.onNodeWithTag("manual_price").performTextReplacement("240")
+        composeTestRule.onNodeWithTag("manual_price_by_card").performTextReplacement("220")
+        composeTestRule.onNodeWithText(text(R.string.save)).performClick()
+
+        assertEquals(
+            listOf(
+                UiAction.ManualFieldChanged(ManualField.NAME, "Творог"),
+                UiAction.ManualFieldChanged(ManualField.AMOUNT, "350 г"),
+                UiAction.ManualFieldChanged(ManualField.PRICE, "240"),
+                UiAction.ManualFieldChanged(ManualField.PRICE_BY_CARD, "220"),
+                UiAction.ManualEntrySubmitted,
+            ),
+            actions,
+        )
+    }
+
+    @Test
+    fun manualDialogCancelSendsDismissAction() {
+        val actions = mutableListOf<UiAction>()
+        renderCompare(
+            CompareUiState(
+                isLoading = false,
+                manualEntry = ManualEntryState(ItemDraft("Творог", "350 г", "240", "")),
+            ),
+            onAction = actions::add,
+        )
+
+        composeTestRule.onNodeWithText(text(R.string.cancel)).performClick()
+
+        assertEquals(listOf(UiAction.ManualEntryDismissed), actions)
+    }
+
+    @Test
+    fun failedRecognitionDialogExplainsWhyManualEntryIsOpen() {
+        renderCompare(
+            CompareUiState(
+                isLoading = false,
+                manualEntry = ManualEntryState(recognitionFailed = true),
+            ),
+        )
+
+        composeTestRule.onNodeWithText(text(R.string.manual_recognition_failed)).assertIsDisplayed()
     }
 
     @Test
@@ -151,18 +219,12 @@ class CompareScreenTest {
     }
 
     @Test
-    fun fiveItemsDisableAddTile() {
+    fun fiveItemsDisableBothEntryButtons() {
         val items = (1..5).map { index -> product("item$index", "Товар $index", "700.00") }
         renderCompare(CompareUiState(items = items, isLoading = false))
 
-        composeTestRule.onNodeWithText(text(R.string.add_item)).assertHasNoClickAction()
-    }
-
-    @Test
-    fun storageWarningIsVisibleWhenPersistenceUnavailable() {
-        renderCompare(CompareUiState(isLoading = false, isPersistenceAvailable = false))
-
-        composeTestRule.onNodeWithText(text(R.string.error_storage)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(text(R.string.scan_price_tag)).assertHasNoClickAction()
+        composeTestRule.onNodeWithText(text(R.string.add_manually)).assertHasNoClickAction()
     }
 
     @Test
@@ -416,10 +478,10 @@ class CompareScreenTest {
     private class FakeCameraController : CameraController {
         override suspend fun bind(
             lifecycleOwner: LifecycleOwner,
-            surfaceProvider: Preview.SurfaceProvider,
+            previewView: PreviewView,
         ) = Unit
 
-        override suspend fun takePicture(): ImageProxy? = null
+        override suspend fun captureToFile(file: File): Boolean = false
 
         override fun unbind() = Unit
     }

@@ -1,15 +1,15 @@
 package com.pricelens.data.ocr
 
-import androidx.camera.core.ImageProxy
 import com.pricelens.domain.model.OcrFrame
+import java.io.File
 
 /** Оба движка получают один и тот же Bitmap: координаты токенов совпадают. */
 class TwoLayerTextRecognizer(
     private val tesseract: TesseractOcr,
     private val rapidOcr: RapidOcr,
 ) : TextRecognizer {
-    override fun recognize(image: ImageProxy): OcrFrame? {
-        val bitmap = OcrImageDecoder.decode(image) ?: return null
+    override fun recognize(photo: File): OcrFrame? {
+        val bitmap = OcrImageDecoder.decode(photo) ?: return null
         return try {
             OcrFrame(
                 width = bitmap.width,

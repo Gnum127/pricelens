@@ -28,10 +28,6 @@ fun ComparisonSummary(
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Text(
-                text = stringResource(R.string.summary_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
             val message = when {
                 best == null || itemCount == 0 -> stringResource(R.string.summary_empty)
                 itemCount == 1 -> stringResource(R.string.summary_single)
