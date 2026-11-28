@@ -39,6 +39,16 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets {
+        // Эталоны реальных ценников общие для JVM- и инструментальных тестов.
+        named("test") {
+            java.srcDir("src/sharedTest/java")
+        }
+        named("androidTest") {
+            java.srcDir("src/sharedTest/java")
+        }
+    }
 }
 
 kotlin {
