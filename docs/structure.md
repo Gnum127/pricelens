@@ -48,7 +48,11 @@ pricelens/
 │       │       ├── values/                     # strings.xml, colors.xml, themes.xml
 │       │       └── xml/                        # backup_rules.xml, data_extraction_rules.xml, file_paths.xml (при необходимости)
 │       ├── test/                               # юнит-тесты: parser, calculator, usecases, проверка манифеста
+│       ├── sharedTest/                         # общие эталоны реальных ценников для test и androidTest
+│       │   └── java/com/pricelens/testing/     # RealPriceTagCases.kt
 │       └── androidTest/                        # инструментальные тесты камеры/БД и Compose UI-тесты
+│           ├── java/com/pricelens/data/ocr/    # PriceTagRecognitionAndroidTest (реальные JPEG)
+│           └── assets/price-tags/              # JPEG 1–13 только для теста (не в APK приложения)
 ├── docs/
 │   ├── agents/
 │   │   ├── code-review.md          # инструкция ревью кода сабагентом
@@ -74,6 +78,8 @@ pricelens/
 | Новый источник данных | `data/local` или `data/ocr`, интерфейс — в `domain/repository` |
 | Новая зависимость | `gradle/libs.versions.toml`, затем `app/build.gradle.kts`, затем `docs/architecture.md` |
 | Минимальный Compose UI-тест критического пути | `src/androidTest/java/com/pricelens/ui/...` |
+| Сквозной OCR-тест на реальном JPEG | `src/androidTest/assets/price-tags/` + `src/androidTest/java/com/pricelens/data/ocr/PriceTagRecognitionAndroidTest.kt` |
+| Общие эталоны 13 ценников | `src/sharedTest/java/com/pricelens/testing/RealPriceTagCases.kt` |
 | Новое разрешение | `AndroidManifest.xml` + обоснование в `docs/architecture.md` (помним про офлайн) |
 
 ## Правила зависимостей между папками

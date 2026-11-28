@@ -187,6 +187,28 @@
 
 **Критерий закрытия:** code-review и test-review пройдены, `assembleDebug` + `test` + `lint` зелёные.
 
+### Этап 12. Сквозные OCR-тесты на реальных фото — закрыт
+
+**Ветка:** `stage/12-ocr-image-tests`
+
+- В `androidTest/assets/price-tags/` добавлены подтверждённые пользователем JPEG `1.jpg`–`13.jpg`;
+  в APK приложения они не попадают (только в test APK).
+- `PriceTagRecognitionAndroidTest` прогоняет каждый JPEG через `TesseractOcr` + `RapidOcr`,
+  `OcrTokenMerger`, `PriceTagParser` и `UnitPriceCalculator`, сверяя эталоны из `docs/ocr-notes.md`.
+  Один кейс дополнительно идёт через production `RecognizePriceTagUseCase`.
+- Эталоны вынесены в `sharedTest/java/com/pricelens/testing/RealPriceTagCases.kt`: JVM-тест на
+  сырых токенах и device-тест на JPEG сверяются с одним источником.
+- Добавлены негатив на однотонный JPEG (`EmptyText`/`Unparseable`, без `Success`) и тест через
+  настоящий `CameraImageTextProvider` с подменой снимка ассетом и проверкой удаления temp-файла.
+- Числовые поля device-тест сверяет точно; название и подпись веса — после нормализации, чтобы не
+  ловить легитимные расхождения OCR между ABI/рантаймами. Точные строки есть в JVM-тесте.
+- Опциональный тест `monitorPhotoProducesTokensWhenAssetIsPresent`: если положить снимок с монитора
+  в `price-tags/monitor.jpg`, проверяет, даёт ли он вообще OCR-токены.
+- Эмулятор/устройство в этой среде не запускались: тесты только компилируются, запуск — в Android Studio.
+
+**Критерий закрытия:** code-review `APPROVE` (2 итерации), test-review `TESTS OK` (2 итерации),
+`:app:assembleDebug test lint` и `:app:compileDebugAndroidTestKotlin` зелёные.
+
 ## 3. Решения, зафиксированные пользователем
 
 | Вопрос | Решение |

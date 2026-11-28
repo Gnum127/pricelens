@@ -9,6 +9,7 @@ import com.pricelens.domain.model.OcrToken
 import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.WeightUnit
 import com.pricelens.domain.pricing.UnitPriceCalculator
+import com.pricelens.testing.RealPriceTagCases
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
@@ -17,8 +18,9 @@ import java.math.BigDecimal
 /**
  * Сырые токены сняты с реальных кадров 1.jpg–7.jpg: координаты RapidOCR взяты из его boxPoint,
  * слова и копейки — из word-level вывода Tesseract rus. Фикстуры 8.jpg–13.jpg фиксируют
- * подтверждённые пользователем эталоны (две цены и шум соседнего ценника). Фотографии
- * в репозиторий не кладутся.
+ * подтверждённые пользователем эталоны (две цены и шум соседнего ценника). Сами JPEG лежат
+ * в `androidTest/assets/price-tags/` и прогоняются сквозным тестом
+ * `PriceTagRecognitionAndroidTest`; в этом юнит-тесте используется только сырой текст.
  */
 class OcrTokenMergerTest {
     private val merger = OcrTokenMerger()
@@ -745,6 +747,27 @@ class OcrTokenMergerTest {
         val parsed = parser.parse(text)!!
         assertThat(parsed.name).isEqualTo("Консервы рыбные шпроты в масле")
         assertDecimal("цена центрального ценника", parsed.price, "139.99")
+    }
+
+    @Test
+    fun localRealTagFixturesMatchSharedImageTestCases() {
+        val local = listOf(
+            case1(), case2(), case3(), case4(), case5(), case6(), case7(),
+            case8(), case9(), case10(), case11(), case12(), case13(),
+        ).associateBy { it.id }
+
+        assertThat(local.keys).containsExactlyElementsIn(RealPriceTagCases.all.map { it.id })
+        RealPriceTagCases.all.forEach { shared ->
+            val case = local[shared.id] ?: error("Нет локального кейса ${shared.id}")
+            assertThat(case.name).isEqualTo(shared.name)
+            assertThat(case.amount).isEqualTo(shared.amount)
+            assertThat(case.label).isEqualTo(shared.amountLabel)
+            assertThat(case.unit).isEqualTo(shared.packageUnit)
+            assertThat(case.price).isEqualTo(shared.price)
+            assertThat(case.priceByCard).isEqualTo(shared.priceByCard)
+            assertThat(case.unitPrice).isEqualTo(shared.unitPrice)
+            assertThat(case.unitPriceUnit).isEqualTo(shared.unitPriceUnit)
+        }
     }
 
     private fun tess(
