@@ -17,8 +17,11 @@
 4. **Ревью тестов** — `general`-сабагент по инструкции [`agents/test-review.md`](agents/test-review.md).
    Передать diff тестов и соответствующий продакшен-код. Все `BLOCKER`/`MAJOR` исправить.
 5. **Успешный запуск проверок:**
-   `./gradlew :app:assembleDebug`, `./gradlew test`, `./gradlew lint` — все зелёные.
+   `./gradlew :app:assembleDebug`, `./gradlew test`, `./gradlew lint` — все зелёные;
+   instrumented-тесты прогоняются на устройстве или эмуляторе.
 6. **Закрытие этапа:** merge ветки в `main`, удалить ветку, `git push origin main`.
+7. **Публикация версии:** полноценный этап завершается GitHub Release с APK из слитого `main`
+   (тег `stage-<NN>-<slug>`, в описании — изменения, проверки и SHA-256 APK).
 
 Локальные проверки разрешается гонять и раньше, но финальный зелёный прогон делается **после** всех ревью.
 
