@@ -7,7 +7,12 @@
     <string name="add_manually">Ввести вручную</string>
     <string name="manual_entry_title">Данные товара</string>
     <string name="manual_recognition_failed">Не удалось распознать цену. Проверьте данные и сохраните товар.</string>
-    <string name="manual_entry_hint">Укажите вес с единицей, например 200 г или 0,95 л</string>
+    <string name="manual_entry_hint">Введите только число и выберите единицу, например 200 г или 0,95 л</string>
+    <string name="unit_gram">г</string>
+    <string name="unit_kilogram">кг</string>
+    <string name="unit_milliliter">мл</string>
+    <string name="unit_liter">л</string>
+    <string name="clear_all">Удалить всё</string>
     <string name="save">Сохранить</string>
     <string name="cancel">Отмена</string>
     <string name="capture_title">Сфотографируйте ценник</string>

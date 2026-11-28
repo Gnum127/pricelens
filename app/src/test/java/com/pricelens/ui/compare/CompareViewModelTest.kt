@@ -1,6 +1,7 @@
 package com.pricelens.ui.compare
 
 import com.google.common.truth.Truth.assertThat
+import com.pricelens.domain.model.ManualUnit
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.RawTextResult
 import com.pricelens.domain.model.UnitPrice
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 
@@ -89,20 +91,49 @@ class CompareViewModelTest {
         viewModel.onAction(UiAction.ManualEntryClicked)
 
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.NAME, "Молоко 1 л"))
-        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.AMOUNT, "950 мл"))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.AMOUNT, "950"))
+        viewModel.onAction(UiAction.ManualUnitChanged(ManualUnit.MILLILITER))
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE, "119"))
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE_BY_CARD, "100"))
 
-        assertThat(viewModel.uiState.value.manualEntry?.draft).isEqualTo(
-            ItemDraft("Молоко 1 л", "950 мл", "119", "100"),
-        )
+        val entry = viewModel.uiState.value.manualEntry
+        assertThat(entry?.draft).isEqualTo(ItemDraft("Молоко 1 л", "950", "119", "100"))
+        assertThat(entry?.unit).isEqualTo(ManualUnit.MILLILITER)
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        delimiter = '|',
+        value = [
+            "12a3,4.5,6|123,456",
+            "12.5|12,5",
+            ",,.|,",
+        ],
+    )
+    fun manualAmountKeepsOnlyDigitsAndOneSeparator(raw: String, expected: String) {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.AMOUNT, raw))
+
+        assertThat(viewModel.uiState.value.manualEntry?.draft?.amount).isEqualTo(expected)
+    }
+
+    @Test
+    fun manualPriceIsNotSanitized() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE, "119,00"))
+
+        assertThat(viewModel.uiState.value.manualEntry?.draft?.price).isEqualTo("119,00")
     }
 
     @Test
     fun manualEntryAddsItemWithCalculatedPriceAndClosesDialog() {
         val viewModel = viewModel()
         viewModel.onAction(UiAction.ManualEntryClicked)
-        fillManualEntry(viewModel, name = "Творог", amount = "350 г", price = "240")
+        fillManualEntry(viewModel, name = "Творог", amount = "350", price = "240")
 
         viewModel.onAction(UiAction.ManualEntrySubmitted)
         advance()
@@ -119,16 +150,91 @@ class CompareViewModelTest {
     }
 
     @Test
+    fun manualUnitFromDialogIsUsedForComparison() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+        fillManualEntry(
+            viewModel,
+            name = "Молоко",
+            amount = "950",
+            price = "119",
+            unit = ManualUnit.MILLILITER,
+        )
+
+        viewModel.onAction(UiAction.ManualEntrySubmitted)
+        advance()
+
+        val item = viewModel.uiState.value.items.single()
+        assertThat(item.packageAmount).isEqualTo(BigDecimal("950"))
+        assertThat(item.packageUnit).isEqualTo(WeightUnit.MILLILITER)
+        assertThat(item.unitPrice.value).isEqualTo(BigDecimal("125.26"))
+        assertThat(item.unitPrice.displayUnit).isEqualTo(UnitPrice.Unit.LITER)
+    }
+
+    @Test
+    fun clearAllRemovesItemsAndPersistsEmptyList() {
+        repository.items = listOf(
+            product("item1", "Первый", "350", "240", "685.71"),
+            product("item2", "Второй", "500", "300", "600.00"),
+        )
+        val viewModel = viewModel()
+        assertThat(viewModel.uiState.value.items).hasSize(2)
+
+        viewModel.onAction(UiAction.ClearAll)
+        advance()
+
+        val state = viewModel.uiState.value
+        assertThat(state.items).isEmpty()
+        assertThat(state.drafts).isEmpty()
+        assertThat(state.cheapestId).isNull()
+        assertThat(repository.items).isEmpty()
+        assertThat(repository.saveCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun clearAllClosesDialogsAndCancelsPendingCapture() {
+        val gated = GatedImageTextProvider()
+        val viewModel = viewModel(imageTextProvider = gated)
+        viewModel.onAction(UiAction.AddClicked)
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        viewModel.onAction(UiAction.ManualEntryClicked)
+        advance()
+        assertThat(gated.readCalls).isEqualTo(1)
+
+        viewModel.onAction(UiAction.ClearAll)
+        gated.gates.single().complete(Unit)
+        advance()
+
+        val state = viewModel.uiState.value
+        assertThat(state.items).isEmpty()
+        assertThat(state.isCaptureOpen).isFalse()
+        assertThat(state.isBusy).isFalse()
+        assertThat(state.manualEntry).isNull()
+        assertThat(repository.items).isEmpty()
+    }
+
+    @Test
+    fun clearAllResetsPermissionDeniedFlag() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.PermissionDenied)
+        assertThat(viewModel.uiState.value.isPermissionDenied).isTrue()
+
+        viewModel.onAction(UiAction.ClearAll)
+
+        assertThat(viewModel.uiState.value.isPermissionDenied).isFalse()
+    }
+
+    @Test
     fun manualEntryRejectsInvalidNumbersAndKeepsDialogOpen() {
         val viewModel = viewModel()
         viewModel.onAction(UiAction.ManualEntryClicked)
-        fillManualEntry(viewModel, name = "Творог", amount = "350 г", price = "abc")
+        fillManualEntry(viewModel, name = "Творог", amount = "350", price = "abc")
 
         val event = expectMessage(viewModel) { viewModel.onAction(UiAction.ManualEntrySubmitted) }
 
         assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
         assertThat(viewModel.uiState.value.manualEntry?.draft).isEqualTo(
-            ItemDraft("Творог", "350 г", "abc", ""),
+            ItemDraft("Творог", "350", "abc", ""),
         )
         assertThat(viewModel.uiState.value.items).isEmpty()
     }
@@ -137,7 +243,7 @@ class CompareViewModelTest {
     fun manualEntryDismissDoesNotAddItem() {
         val viewModel = viewModel()
         viewModel.onAction(UiAction.ManualEntryClicked)
-        fillManualEntry(viewModel, name = "Творог", amount = "350 г", price = "240")
+        fillManualEntry(viewModel, name = "Творог", amount = "350", price = "240")
 
         viewModel.onAction(UiAction.ManualEntryDismissed)
 
@@ -162,7 +268,7 @@ class CompareViewModelTest {
         repository.items = (1..4).map { product("item$it", "Товар $it", "350", "240", "685.71") }
         val viewModel = viewModel()
         viewModel.onAction(UiAction.ManualEntryClicked)
-        fillManualEntry(viewModel, name = "Пятый", amount = "350 г", price = "240")
+        fillManualEntry(viewModel, name = "Пятый", amount = "350", price = "240")
         viewModel.onAction(UiAction.CaptureConfirmed)
         advance()
         assertThat(viewModel.uiState.value.items).hasSize(5)
@@ -172,7 +278,7 @@ class CompareViewModelTest {
         assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.LimitReached))
         assertThat(viewModel.uiState.value.items).hasSize(5)
         assertThat(viewModel.uiState.value.manualEntry?.draft)
-            .isEqualTo(ItemDraft("Пятый", "350 г", "240", ""))
+            .isEqualTo(ItemDraft("Пятый", "350", "240", ""))
     }
 
     @Test
@@ -1123,7 +1229,7 @@ class CompareViewModelTest {
     fun manuallyAddedItemSurvivesRestart() {
         val first = viewModel()
         first.onAction(UiAction.ManualEntryClicked)
-        fillManualEntry(first, name = "Творог", amount = "350 г", price = "240")
+        fillManualEntry(first, name = "Творог", amount = "350", price = "240")
         first.onAction(UiAction.ManualEntrySubmitted)
         advance()
         val before = first.uiState.value
@@ -1150,9 +1256,11 @@ class CompareViewModelTest {
         amount: String,
         price: String,
         priceByCard: String = "",
+        unit: ManualUnit = ManualUnit.GRAM,
     ) {
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.NAME, name))
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.AMOUNT, amount))
+        viewModel.onAction(UiAction.ManualUnitChanged(unit))
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE, price))
         viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE_BY_CARD, priceByCard))
     }

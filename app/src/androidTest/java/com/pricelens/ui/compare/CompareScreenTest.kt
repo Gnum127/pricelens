@@ -18,22 +18,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.pricelens.R
 import com.pricelens.core.design.AppTheme
+import com.pricelens.core.design.BestCardOutline
+import com.pricelens.core.design.BestCardOutlineKey
 import com.pricelens.data.camera.CameraController
 import com.pricelens.data.camera.CameraPermissionChecker
+import com.pricelens.domain.model.ManualUnit
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.UnitPrice
 import com.pricelens.domain.model.UnitPriceSource
@@ -114,9 +120,11 @@ class CompareScreenTest {
         composeTestRule.onNodeWithText(text(R.string.amount_label)).assertIsDisplayed()
         composeTestRule.onNodeWithText(text(R.string.price_label)).assertIsDisplayed()
         composeTestRule.onNodeWithText(text(R.string.price_by_card_label)).assertIsDisplayed()
+        // Диалог сразу фокусирует числовое поле: пользователь попадает в цифровую клавиатуру.
+        composeTestRule.onNodeWithTag("manual_amount").assertIsFocused()
 
         composeTestRule.onNodeWithTag("manual_name").performTextReplacement("Творог")
-        composeTestRule.onNodeWithTag("manual_amount").performTextReplacement("350 г")
+        composeTestRule.onNodeWithTag("manual_amount").performTextReplacement("350")
         composeTestRule.onNodeWithTag("manual_price").performTextReplacement("240")
         composeTestRule.onNodeWithTag("manual_price_by_card").performTextReplacement("220")
         composeTestRule.onNodeWithText(text(R.string.save)).performClick()
@@ -124,13 +132,123 @@ class CompareScreenTest {
         assertEquals(
             listOf(
                 UiAction.ManualFieldChanged(ManualField.NAME, "Творог"),
-                UiAction.ManualFieldChanged(ManualField.AMOUNT, "350 г"),
+                UiAction.ManualFieldChanged(ManualField.AMOUNT, "350"),
                 UiAction.ManualFieldChanged(ManualField.PRICE, "240"),
                 UiAction.ManualFieldChanged(ManualField.PRICE_BY_CARD, "220"),
                 UiAction.ManualEntrySubmitted,
             ),
             actions,
         )
+    }
+
+    @Test
+    fun manualUnitDropdownSendsSelectedUnit() {
+        val actions = mutableListOf<UiAction>()
+        renderCompare(
+            CompareUiState(isLoading = false, manualEntry = ManualEntryState()),
+            onAction = actions::add,
+        )
+        composeTestRule.onNodeWithText(text(R.string.unit_gram)).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("manual_unit").performClick()
+        composeTestRule.onNodeWithTag("manual_unit_kilogram").performClick()
+
+        assertEquals(listOf(UiAction.ManualUnitChanged(ManualUnit.KILOGRAM)), actions)
+
+        actions.clear()
+        renderCompare(
+            CompareUiState(isLoading = false, manualEntry = ManualEntryState()),
+            onAction = actions::add,
+        )
+        composeTestRule.onNodeWithTag("manual_unit").performClick()
+        composeTestRule.onNodeWithTag("manual_unit_liter").performClick()
+
+        assertEquals(listOf(UiAction.ManualUnitChanged(ManualUnit.LITER)), actions)
+    }
+
+    @Test
+    fun manualUnitButtonShowsCurrentSelection() {
+        renderCompare(
+            CompareUiState(
+                isLoading = false,
+                manualEntry = ManualEntryState(unit = ManualUnit.LITER),
+            ),
+        )
+
+        composeTestRule.onNodeWithText(text(R.string.unit_liter)).assertIsDisplayed()
+    }
+
+    @Test
+    fun clearAllButtonIsShownOnlyWithItems() {
+        val actions = mutableListOf<UiAction>()
+        renderCompare(CompareUiState(isLoading = false), onAction = actions::add)
+        composeTestRule.onNodeWithText(text(R.string.clear_all)).assertIsNotDisplayed()
+
+        composeTestRule.setContent {
+            AppTheme {
+                CompareScreen(
+                    state = CompareUiState(
+                        items = listOf(product("a", "Творог", "685.71")),
+                        isLoading = false,
+                    ),
+                    cameraController = FakeCameraController(),
+                    permissionChecker = CameraPermissionChecker { false },
+                    snackbarHostState = SnackbarHostState(),
+                    onAction = actions::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(text(R.string.clear_all)).assertIsDisplayed().performClick()
+        assertEquals(listOf(UiAction.ClearAll), actions)
+    }
+
+    @Test
+    fun bestCardIsMarkedOnlyWhenCheapestExists() {
+        renderCompare(
+            CompareUiState(
+                items = listOf(
+                    product("a", "Творог", "685.71"),
+                    product("b", "Творог 5%", "662.50"),
+                ),
+                cheapestId = "b",
+                isLoading = false,
+            ),
+        )
+
+        composeTestRule.onNodeWithTag("best_card").assertIsDisplayed()
+        composeTestRule.onAllNodesWithTag("best_card").assertCountEquals(1)
+    }
+
+    @Test
+    fun noBestCardWhenCheapestIdIsNull() {
+        renderCompare(
+            CompareUiState(
+                items = listOf(product("a", "Творог", "685.71")),
+                cheapestId = null,
+                isLoading = false,
+            ),
+        )
+
+        composeTestRule.onAllNodesWithTag("best_card").assertCountEquals(0)
+    }
+
+    @Test
+    fun bestCardOutlineUsesGreenPrimaryColor() {
+        renderCompare(
+            CompareUiState(
+                items = listOf(product("a", "Творог", "685.71")),
+                cheapestId = "a",
+                isLoading = false,
+            ),
+        )
+
+        val spec = composeTestRule.onNodeWithTag("best_card")
+            .fetchSemanticsNode().config[BestCardOutlineKey]
+        assertEquals(BestCardOutline.WIDTH_DP, spec.widthDp)
+        assertEquals(BestCardOutline.COLOR_RES, spec.colorRes)
+        val color = composeTestRule.activity.resources.getColor(spec.colorRes, null)
+        assertEquals(0xFF2E7D6B.toInt(), color)
     }
 
     @Test
@@ -159,6 +277,32 @@ class CompareScreenTest {
         )
 
         composeTestRule.onNodeWithText(text(R.string.manual_recognition_failed)).assertIsDisplayed()
+    }
+
+    @Test
+    fun entryButtonsStayAboveCardsAndClearAllBelowSummary() {
+        assertEntryLayout(1)
+        assertEntryLayout(5)
+    }
+
+    private fun assertEntryLayout(itemCount: Int) {
+        val items = (1..itemCount).map { product("item$it", "Товар $it", "685.71") }
+        renderCompare(
+            CompareUiState(items = items, cheapestId = "item1", isLoading = false),
+        )
+
+        val actionsBottom = composeTestRule.onNodeWithTag("entry_actions")
+            .fetchSemanticsNode().boundsInRoot.bottom
+        val firstCardTop = composeTestRule.onNodeWithTag("best_card")
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(actionsBottom <= firstCardTop)
+
+        composeTestRule.onNodeWithTag("clear_all").performScrollTo()
+        val summaryBottom = composeTestRule.onNodeWithTag("comparison_summary")
+            .fetchSemanticsNode().boundsInRoot.bottom
+        val clearTop = composeTestRule.onNodeWithTag("clear_all")
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(summaryBottom <= clearTop)
     }
 
     @Test

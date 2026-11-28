@@ -2,10 +2,12 @@ package com.pricelens.ui.compare
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -13,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -55,6 +58,15 @@ fun CompareScreen(
                     style = MaterialTheme.typography.headlineMedium,
                 )
             }
+            item {
+                val canAdd = !state.isLoading &&
+                    state.items.size < AddItemUseCase.MAX_ITEMS && !state.isBusy
+                EntryActions(
+                    enabled = canAdd,
+                    onScan = { onAction(UiAction.AddClicked) },
+                    onManual = { onAction(UiAction.ManualEntryClicked) },
+                )
+            }
             items(items = state.items, key = { it.id }) { item ->
                 val draft = state.drafts[item.id] ?: ItemDraft(
                     name = item.name,
@@ -91,18 +103,21 @@ fun CompareScreen(
                     )
                 }
             }
-            item {
-                val canAdd = !state.isLoading &&
-                    state.items.size < AddItemUseCase.MAX_ITEMS && !state.isBusy
-                EntryActions(
-                    enabled = canAdd,
-                    onScan = { onAction(UiAction.AddClicked) },
-                    onManual = { onAction(UiAction.ManualEntryClicked) },
-                )
-            }
             if (!state.isLoading) {
                 item {
                     ComparisonSummary(best = best, itemCount = state.items.size)
+                }
+            }
+            if (state.items.isNotEmpty() && !state.isLoading) {
+                item {
+                    OutlinedButton(
+                        onClick = { onAction(UiAction.ClearAll) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("clear_all"),
+                    ) {
+                        Text(text = stringResource(R.string.clear_all))
+                    }
                 }
             }
         }
@@ -112,6 +127,7 @@ fun CompareScreen(
         ManualEntryDialog(
             state = entry,
             onFieldChange = { field, value -> onAction(UiAction.ManualFieldChanged(field, value)) },
+            onUnitChange = { onAction(UiAction.ManualUnitChanged(it)) },
             onSave = { onAction(UiAction.ManualEntrySubmitted) },
             onDismiss = { onAction(UiAction.ManualEntryDismissed) },
         )
