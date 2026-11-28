@@ -617,6 +617,220 @@ class OcrTokenMergerTest {
     }
 
     @Test
+    fun threeDigitRublesAtLowerConfidenceThresholdAreUsed() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("Молоко", 380, 250, 550, 290),
+                tess("1 кг", 480, 275, 590, 295),
+                tess("99", 602, 320, 680, 390),
+                rapid("119", 400, 300, 600, 450, 0.65f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("сводка на границе 3-значного confidence: $text").that(parsed).isNotNull()
+        assertDecimal("цена 119 на границе порога", parsed!!.price, "119.99")
+    }
+
+    @Test
+    fun threeDigitRublesBelowLowerConfidenceThresholdAreIgnored() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("Молоко", 380, 250, 550, 290),
+                tess("1 кг", 480, 275, 590, 295),
+                tess("99", 602, 320, 680, 390),
+                rapid("119", 400, 300, 600, 450, 0.64f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("порог 0.65 не должен дать цену 119,99: $text")
+            .that(text).doesNotContain("119,99")
+        assertWithMessage("fallback не должен строить валютную строку: $text")
+            .that(text).doesNotContain("₽")
+        assertDecimal("цена из fallback", parsed!!.price, "99")
+    }
+
+    @Test
+    fun rapidCardLabelSelectsItsPriceByHorizontalPosition() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ", 300, 200, 700, 240),
+                rapid("LeHa nO KAPTe", 650, 150, 750, 190, 0.77f),
+                // Подпись ближе к 243 по горизонтали, но по 2D — к 270.
+                rapid("270", 430, 260, 650, 330),
+                rapid("243", 620, 340, 840, 430),
+                tess("99", 600, 270, 640, 310),
+                tess("50", 780, 360, 820, 400),
+                rapid("Bec:200r", 300, 330, 390, 360, 0.9f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("подпись RapidOCR должна выбрать свою цену: $text").that(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270.99")
+        assertDecimal("цена по карте", parsed.priceByCard, "243.50")
+        assertDecimal("цена за кг по карте", calculator.calculate(parsed)!!.value, "1217.50")
+    }
+
+    @Test
+    fun smallDiscountPriceIsKeptRelativeToMainAnchor() {
+        val frame = OcrFrame(
+            width = 1100,
+            height = 600,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ", 300, 200, 700, 240),
+                rapid("LeHa nO KAPTe", 650, 190, 750, 230, 0.77f),
+                // 110 px — меньше глобального порога из-за крупной цифры соседнего ценника,
+                // но ≥60% от основной цены 170 px того же ценника.
+                rapid("270", 430, 260, 650, 430),
+                rapid("243", 620, 300, 840, 410),
+                rapid("27", 1400, 250, 1500, 500),
+                tess("99", 600, 300, 640, 340),
+                tess("50", 790, 320, 830, 360),
+                rapid("Bec:200r", 300, 440, 390, 470, 0.9f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("скидочная цена меньшего размера не должна теряться: $text")
+            .that(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270.99")
+        assertDecimal("цена по карте", parsed.priceByCard, "243.50")
+        assertDecimal("цена за кг по карте", calculator.calculate(parsed)!!.value, "1217.50")
+    }
+
+    @Test
+    fun rapidQuotedNameWinsOverShortTesseractName() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ", 300, 220, 500, 250, 0.65f),
+                rapid("NEYEHbE \"OBCAHOE\"", 300, 215, 700, 250, 0.9f),
+                tess("200 г", 500, 260, 620, 290),
+                rapid("270", 400, 300, 620, 450),
+                tess("99", 630, 320, 700, 380),
+                rapid("py6/wt", 630, 390, 740, 420, 0.8f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("транслитерированное имя с кавычками должно выиграть: $text")
+            .that(parsed).isNotNull()
+        assertWithMessage("имя из RapidOCR").that(parsed!!.name).isEqualTo("ПЕЧЕНЬЕ «ОВСЯНОЕ»")
+        assertDecimal("цена", parsed.price, "270.99")
+    }
+
+    @Test
+    fun lowConfidenceRapidNameIsIgnored() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ", 300, 220, 500, 250, 0.65f),
+                rapid("NEYEHbE \"OBCAHOE\"", 300, 215, 700, 250, 0.55f),
+                tess("200 г", 500, 260, 620, 290),
+                rapid("270", 400, 300, 620, 450),
+                tess("99", 630, 320, 700, 380),
+                rapid("py6/wt", 630, 390, 740, 420, 0.8f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("имя с низким confidence не должно попасть в сводку: $text")
+            .that(text).doesNotContain("ОВСЯНОЕ")
+        assertWithMessage("сводка без низкоуверенного имени разбирается: $text")
+            .that(parsed).isNotNull()
+        assertWithMessage("имя из Tesseract").that(parsed!!.name).isEqualTo("ПЕЧЕНЬЕ")
+    }
+
+    @Test
+    fun rapidOnlyWeightWithCyrillicUnitIsUsed() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ", 300, 220, 700, 250),
+                rapid("Bec:200r", 300, 260, 390, 290, 0.9f),
+                rapid("270", 400, 300, 620, 450),
+                tess("99", 630, 320, 700, 380),
+                rapid("py6/wt", 630, 390, 740, 420, 0.8f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("вес из RapidOCR должен разобраться: $text").that(parsed).isNotNull()
+        assertDecimal("вес из RapidOCR", parsed!!.packageAmount, "200")
+        assertDecimal("цена", parsed.price, "270.99")
+    }
+
+    @Test
+    fun reversedDecimalWeightRangeIsNotUsed() {
+        val base = case3().frame
+        val frame = base.copy(
+            tokens = base.tokens.map { token ->
+                if ("230-240г" in token.text) {
+                    token.copy(text = token.text.replace("230-240г", "240,5-230,5г"))
+                } else {
+                    token
+                }
+            },
+        )
+
+        val text = merger.merge(frame)
+
+        assertWithMessage("перевёрнутый диапазон не должен стать весом: $text")
+            .that(parser.parse(text)).isNull()
+    }
+
+    @Test
+    fun postnoeAndSauceNoiseAreNotIncludedInName() {
+        val base = case1().frame
+        // Оставляем одно короткое слово Tesseract, чтобы источником имени стал RapidOCR
+        // с кавычками: иначе шум отфильтровался бы вместе со всем Rapid-именем.
+        val tokens = base.tokens.filterNot { token ->
+            token.source == OcrSource.TESSERACT &&
+                ("Биг Ланч" in token.text || "бургиньон" in token.text || "лесными" in token.text)
+        } + listOf(
+            rapid("постное", 480, 300, 570, 330, 0.9f),
+            rapid("томатном соусе", 700, 300, 900, 330, 0.9f),
+        )
+        val frame = base.copy(tokens = tokens)
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("шум в полосе названия: $text").that(parsed).isNotNull()
+        assertWithMessage("имя из RapidOCR без шума: $text")
+            .that(parsed!!.name).isEqualTo("«Биг Ланч»")
+        assertWithMessage("постное не должно попасть в сводку: $text")
+            .that(text).doesNotContain("постное")
+        assertWithMessage("соус не должен попасть в сводку: $text")
+            .that(text).doesNotContain("томатном")
+    }
+
+    @Test
     fun emptyFrameProducesEmptyText() {
         assertThat(merger.merge(OcrFrame(1080, 720, emptyList()))).isEmpty()
     }
@@ -647,7 +861,7 @@ class OcrTokenMergerTest {
                 tess("Молоко", 380, 250, 550, 290),
                 tess("1 кг", 480, 275, 590, 295),
                 tess("99", 602, 320, 680, 390),
-                rapid("49", 400, 300, 600, 450, 0.9f),
+                rapid("49", 400, 300, 600, 450, 0.7f),
             ),
         )
 
@@ -657,7 +871,7 @@ class OcrTokenMergerTest {
     }
 
     @Test
-    fun rublesBelowConfidenceThresholdAreIgnored() {
+    fun rublesBelowCalibratedThresholdAreIgnored() {
         val frame = OcrFrame(
             width = 1000,
             height = 600,
@@ -665,20 +879,64 @@ class OcrTokenMergerTest {
                 tess("Паштет", 380, 250, 550, 290),
                 tess("70 г", 450, 275, 560, 296),
                 tess("99", 602, 320, 680, 390),
-                rapid("49", 400, 300, 600, 450, 0.89f),
+                rapid("49", 400, 300, 600, 450, 0.69f),
             ),
         )
 
         val text = merger.merge(frame)
 
-        // Если порог случайно снизить, якорь 49 соберётся с копейками 99 в цену 49,99 ₽.
+        // Порог откалиброван на реальных JPEG: якорь 0.69 не должен собраться с копейками 99.
         assertWithMessage("низкий confidence не должен дать цену 49,99: $text")
             .that(text).doesNotContain("49,99")
         assertWithMessage("без якоря валютная строка не строится: $text")
             .that(text).doesNotContain("₽")
         assertWithMessage("fallback всё равно разбирается: $text").that(parser.parse(text)).isNotNull()
-        assertWithMessage("цена из fallback не равна 49,99: $text")
-            .that(parser.parse(text)?.price?.compareTo(BigDecimal("49.99"))).isNotEqualTo(0)
+        assertDecimal("цена из fallback", parser.parse(text)!!.price, "99")
+    }
+
+    @Test
+    fun smallDigitsNearFrameCenterAreNotTreatedAsPriceAnchor() {
+        val frame = OcrFrame(
+            width = 1000,
+            height = 600,
+            tokens = listOf(
+                tess("Молоко", 400, 200, 600, 230),
+                tess("1 кг", 430, 230, 560, 250),
+                // Мелкая цифра ближе к центру кадра, чем настоящая цена.
+                rapid("12", 480, 290, 540, 320),
+                rapid("139", 450, 300, 650, 450, 0.95f),
+                tess("99", 660, 320, 740, 390),
+                rapid("py6/wt", 650, 400, 760, 430, 0.8f),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("мелкая цифра не должна стать ценой: $text").that(parsed).isNotNull()
+        assertDecimal("цена крупного ценника", parsed!!.price, "139.99")
+    }
+
+    @Test
+    fun decimalWeightRangeWithCommaIsKept() {
+        val base = case3().frame
+        val frame = base.copy(
+            tokens = base.tokens.map { token ->
+                if ("230-240г" in token.text) {
+                    token.copy(text = token.text.replace("230-240г", "230,5-240,5г"))
+                } else {
+                    token
+                }
+            },
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("диапазон с запятой должен попасть в сводку: $text").that(parsed).isNotNull()
+        assertDecimal("верхняя граница диапазона", parsed!!.packageAmount, "240.5")
+        assertWithMessage("подпись десятичного диапазона").that(parsed.packageAmountLabel)
+            .isEqualTo("230,5-240,5 г")
     }
 
     @Test

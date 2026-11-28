@@ -7,6 +7,7 @@ import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.pricelens.data.camera.CameraController
 import com.pricelens.data.camera.CameraImageTextProvider
 import com.pricelens.data.camera.CameraPermissionChecker
@@ -33,20 +34,34 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.math.BigDecimal
+import java.security.MessageDigest
 
 /**
  * Сквозная проверка распознавания на настоящих JPEG, а не на синтетических токенах.
  * Файлы 1.jpg–13.jpg подтверждены пользователем и лежат в androidTest/assets/price-tags.
  * Тест требует устройство или эмулятор: обычный `test` его не запускает.
  *
- * Числовые поля сверяются точно. Название и подпись веса нормализуются: вывод OCR зависит
- * от ABI/рантайма, а точные строки уже зафиксированы в JVM-тесте на сырых токенах.
+ * Числовые поля сверяются точно. Название сверяется по набору смысловых слов без учёта
+ * порядка: на настоящих JPEG движки читают одни и те же слова в разном порядке и иногда
+ * теряют часть слова (`говядиной` → `диной`). Все слова эталона обязаны присутствовать,
+ * кроме явно перечисленных нечитаемых; лишние слова тоже не допускаются. Точные строки
+ * зафиксированы в JVM-тесте на сырых токенах, где порядок детерминирован.
  */
 @RunWith(AndroidJUnit4::class)
 class PriceTagRecognitionAndroidTest {
     private val merger = OcrTokenMerger()
     private val parser = PriceTagParser()
     private val calculator = UnitPriceCalculator()
+
+    @Test
+    fun assetChecksumsMatchOcrNotes() {
+        RealPriceTagCases.all.forEach { tagCase ->
+            val bytes = testContext.assets.open("$ASSET_FOLDER/${tagCase.id}").use { it.readBytes() }
+            val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
+                .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+            assertEquals("${tagCase.id}: ассет перекодирован", assetSha256[tagCase.id], hash)
+        }
+    }
 
     @Test
     fun photo01_noodleNameAndCentralPrice() = assertTag(case("1.jpg"))
@@ -118,15 +133,15 @@ class PriceTagRecognitionAndroidTest {
     @Test
     fun assetThroughProductionCameraImageTextProvider() = runBlocking {
         val case = case("13.jpg")
-        val before = context.cacheDir.listFiles().orEmpty().toSet()
+        val before = temporaryJpegs()
         var info = "[${case.id}] via CameraImageTextProvider"
         val provider = CameraImageTextProvider(
-            cacheDir = context.cacheDir,
+            cacheDir = appContext.cacheDir,
             cameraController = object : CameraController {
                 override suspend fun bind(lifecycleOwner: LifecycleOwner, previewView: PreviewView) = Unit
 
                 override suspend fun captureToFile(file: File): Boolean {
-                    context.assets.open("$ASSET_FOLDER/${case.id}").use { input ->
+                    testContext.assets.open("$ASSET_FOLDER/${case.id}").use { input ->
                         file.outputStream().use { output -> input.copyTo(output) }
                     }
                     return true
@@ -148,7 +163,7 @@ class PriceTagRecognitionAndroidTest {
         val result = RecognizePriceTagUseCase(provider, merger, parser, calculator)()
 
         assertTrue("${case.id}: провайдер вернул $result", result is OcrResult.Success)
-        val after = context.cacheDir.listFiles().orEmpty().toSet()
+        val after = temporaryJpegs()
         assertEquals("${case.id}: временный JPEG должен быть удалён", before, after)
         val success = result as OcrResult.Success
         assertParsed(case, success.parsed, success.unitPrice, info)
@@ -177,7 +192,7 @@ class PriceTagRecognitionAndroidTest {
         val file = "monitor.jpg"
         Assume.assumeTrue(
             "Положите снимок с монитора в app/src/androidTest/assets/price-tags/monitor.jpg",
-            context.assets.list(ASSET_FOLDER)?.contains(file) == true,
+            testContext.assets.list(ASSET_FOLDER)?.contains(file) == true,
         )
 
         val photo = copyAsset(file)
@@ -231,7 +246,13 @@ class PriceTagRecognitionAndroidTest {
         info: String,
     ) {
         val actual = "$info parsed=[$parsed] unitPrice=[$unitPrice]"
-        assertEquals("$actual: название", normalizeName(case.name), normalizeName(parsed.name))
+        assertNameCoversExpected(case.id, case.name, parsed.name, actual)
+        if (case.id == "10.jpg") {
+            assertTrue("$actual: кавычки в названии должны сохраниться", parsed.name?.contains('«') == true)
+        }
+        if (case.id == "4.jpg") {
+            assertTrue("$actual: ж/б в названии должно сохраниться", parsed.name?.contains("ж/б") == true)
+        }
         assertDecimal("$actual: вес", parsed.packageAmount, case.amount)
         assertEquals(
             "$actual: подпись веса",
@@ -249,6 +270,48 @@ class PriceTagRecognitionAndroidTest {
         assertEquals("$actual: единица цены", case.unitPriceUnit, unitPrice.displayUnit)
     }
 
+    /**
+     * Настоящий снимок даёт нестабильный порядок слов и обрывки слов из-за скошенного текста.
+     * Требуем все смысловые слова эталона, кроме явно нечитаемых на этом снимке, и запрещаем
+     * лишние слова. Обрывок (`диной` для `говядиной`) считается совпадением. Числовые поля
+     * выше сверяются точно, а точные строки — в JVM-тесте на фиксированных токенах.
+     */
+    private fun assertNameCoversExpected(
+        fileName: String,
+        expected: String,
+        actual: String?,
+        info: String,
+    ) {
+        val expectedWords = contentWords(expected)
+        val actualWords = contentWords(actual)
+        val optional = unreadableWords(fileName)
+        val missing = expectedWords.filterNot { word ->
+            word in optional || actualWords.any { it.matchesWord(word) }
+        }
+        assertTrue(
+            "$info: название потеряло слова $missing из $expectedWords: [$actual]",
+            missing.isEmpty(),
+        )
+        val unexpected = actualWords.filterNot { word ->
+            expectedWords.any { word.matchesWord(it) }
+        }
+        assertTrue("$info: в названии лишние слова $unexpected: [$actual]", unexpected.isEmpty())
+    }
+
+    private fun String.matchesWord(expected: String): Boolean =
+        contains(expected) || expected.contains(this) && length >= MIN_FRAGMENT_LENGTH
+
+    /** Слова, которые bundled-движки не прочитали на конкретном эталонном JPEG. */
+    private fun unreadableWords(fileName: String): Set<String> = when (fileName) {
+        "1.jpg" -> setOf("лапша")
+        "4.jpg" -> setOf("родину")
+        else -> emptySet()
+    }
+
+    private fun contentWords(value: String?): List<String> = normalizeName(value)
+        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .filter { it.length >= MIN_CONTENT_WORD_LENGTH }
+
     /** OCR может различать кавычки, регистр и пробелы в зависимости от ABI/рантайма. */
     private fun normalizeName(value: String?): String = value.orEmpty()
         .lowercase()
@@ -264,10 +327,15 @@ class PriceTagRecognitionAndroidTest {
         .replace(Regex("\\s*-\\s*"), "-")
         .replace(" ", "")
 
+    /** Проверяем только наши временные снимки: рантайм может писать в кеш и другие файлы. */
+    private fun temporaryJpegs(): Set<File> = appContext.cacheDir.listFiles().orEmpty()
+        .filter { it.name.startsWith("price-tag-") }
+        .toSet()
+
     private fun copyAsset(file: String): File {
-        val target = File.createTempFile("price-tag-", ".jpg", context.cacheDir)
+        val target = File.createTempFile("price-tag-", ".jpg", appContext.cacheDir)
         try {
-            context.assets.open("$ASSET_FOLDER/$file").use { input ->
+            testContext.assets.open("$ASSET_FOLDER/$file").use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
             return target
@@ -278,7 +346,7 @@ class PriceTagRecognitionAndroidTest {
     }
 
     private fun createBlankPhoto(): File {
-        val target = File.createTempFile("blank-tag-", ".jpg", context.cacheDir)
+        val target = File.createTempFile("blank-tag-", ".jpg", appContext.cacheDir)
         val bitmap = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
         try {
             bitmap.eraseColor(Color.WHITE)
@@ -299,22 +367,44 @@ class PriceTagRecognitionAndroidTest {
         assertEquals(message, 0, actual!!.compareTo(BigDecimal(expected)))
     }
 
-    private fun OcrFrame.describe(): String = tokens.joinToString(" | ") {
+    private fun OcrFrame.describe(): String = tokens.joinToString("\n  ") {
         "${it.source}:'${it.text}' conf=${it.confidence} box=${it.box}"
     }
 
     companion object {
         private const val ASSET_FOLDER = "price-tags"
+        private const val MIN_CONTENT_WORD_LENGTH = 3
+        private const val MIN_FRAGMENT_LENGTH = 5
+
+        /** Дублирует таблицу из docs/ocr-notes.md: защищает эталоны от перекодировки. */
+        private val assetSha256 = mapOf(
+            "1.jpg" to "4FBD17D4CE62CCB132C37B761F4EE774DBBCE4F6DE104315F5DD60661812765C",
+            "2.jpg" to "B85ABBA42157BF5047F862CCB4190E5072AC6067E9F4712DF4D5B26B556C8701",
+            "3.jpg" to "AA9DBF5DFE3B544BF737BF7D7119C7FFA15C4B08F0D33339749471164F56A1D5",
+            "4.jpg" to "4FBA56232B296C70E56DAAA7DDCA073000467ECF9648BFBB3067952242D584A6",
+            "5.jpg" to "FC7D254B51767273C5686E918E697B43172E57DD6F59ADD1771868D0F08BAC8E",
+            "6.jpg" to "DD9505E8E9EEE3F3A2DCA2AF481D1D5CB05D55BCA1B35DC03D090E136D56DF63",
+            "7.jpg" to "0613F56112EAD909AEA9698C792C5AC77DE9D14A6AFF914F04A4870127B370E0",
+            "8.jpg" to "646A5D5B7D405E35183A0677E84A81145678595E8C9F7C40970B65DC8C73B64F",
+            "9.jpg" to "E04243B2375DB3D38B71C3687C03D2F93CEF5583277AE0C77577D8E672A8FDFE",
+            "10.jpg" to "E8FF4FB8A381C9CAFCC6DF4991E9FFD92BA9BB70A6EA421A8BF1FCACD3E0D66C",
+            "11.jpg" to "548B845DD190B4AD497734363E03DE8BC178E859E7337F698EE34A5F8462FE7C",
+            "12.jpg" to "19C696AA21DDE05098B2960AB9AD80AA7CCA575EA37ED75370305ABCEFEBF09C",
+            "13.jpg" to "6D9A08AD7CAC05F3A1EDE7E8EA399D64393E8928D2C3E97116889CC34EB42993",
+        )
 
         // Один движок на процесс: у Tesseract/RapidOCR нет публичного close, JUnit4 выполняет тесты последовательно.
-        private lateinit var context: Context
+        private lateinit var appContext: Context
+        private lateinit var testContext: Context
         private lateinit var recognizer: TwoLayerTextRecognizer
 
         @BeforeClass
         @JvmStatic
         fun setUpClass() {
-            context = ApplicationProvider.getApplicationContext()
-            recognizer = TwoLayerTextRecognizer(TesseractOcr(context), RapidOcr(context))
+            // Модели и temp-файлы живут в приложении, а JPEG — в assets test APK.
+            appContext = ApplicationProvider.getApplicationContext()
+            testContext = InstrumentationRegistry.getInstrumentation().context
+            recognizer = TwoLayerTextRecognizer(TesseractOcr(appContext), RapidOcr(appContext))
         }
     }
 }
