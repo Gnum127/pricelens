@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.pricelens.data.local.db.CURRENT_SESSION_ID
 import com.pricelens.domain.model.ProductItem
 import com.pricelens.domain.model.UnitPrice
+import com.pricelens.domain.model.UnitPriceSource
 import com.pricelens.domain.model.WeightUnit
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -61,6 +62,26 @@ class PriceTagMappingsTest {
     }
 
     @Test
+    fun keepsCardPriceFromTag() {
+        val item = item("card").copy(priceByCard = BigDecimal("243"))
+
+        val entity = item.toEntity(position = 1)
+
+        assertDecimal(entity.priceByCard, "243")
+        assertThat(entity.toDomain()).isEqualTo(item)
+    }
+
+    @Test
+    fun keepsExplicitUnitPriceSource() {
+        val item = item("explicit").copy(unitPriceSource = UnitPriceSource.EXPLICIT)
+
+        val entity = item.toEntity(position = 0)
+
+        assertThat(entity.unitPriceSource).isEqualTo(UnitPriceSource.EXPLICIT)
+        assertThat(entity.toDomain()).isEqualTo(item)
+    }
+
+    @Test
     fun mapsItemWithoutSourceText() {
         val item = item("no-source").copy(sourceText = null)
 
@@ -68,6 +89,11 @@ class PriceTagMappingsTest {
 
         assertThat(entity.sourceText).isNull()
         assertThat(entity.toDomain()).isEqualTo(item)
+    }
+
+    private fun assertDecimal(actual: BigDecimal?, expected: String) {
+        assertThat(actual).isNotNull()
+        assertThat(actual!!.compareTo(BigDecimal(expected))).isEqualTo(0)
     }
 
     private fun item(id: String) = ProductItem(

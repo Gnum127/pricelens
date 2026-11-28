@@ -20,6 +20,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.pricelens.R
 import com.pricelens.domain.model.ProductItem
+import com.pricelens.domain.model.UnitPriceSource
+import com.pricelens.domain.pricing.isCardPriceUsed
 
 @Composable
 fun PriceCard(
@@ -27,11 +29,13 @@ fun PriceCard(
     nameValue: String,
     amountValue: String,
     priceValue: String,
+    priceByCardValue: String,
     isBest: Boolean,
     difference: String?,
     onNameChange: (String) -> Unit,
     onAmountChange: (String) -> Unit,
     onPriceChange: (String) -> Unit,
+    onPriceByCardChange: (String) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -74,6 +78,34 @@ fun PriceCard(
                     label = { Text(stringResource(R.string.price_label)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = priceByCardValue,
+                    onValueChange = onPriceByCardChange,
+                    label = { Text(stringResource(R.string.price_by_card_label)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = stringResource(
+                        when {
+                            item.unitPriceSource == UnitPriceSource.EXPLICIT ->
+                                R.string.used_explicit_price
+                            isCardPriceUsed(item.price, item.priceByCard) ->
+                                R.string.used_card_price
+                            else -> R.string.used_regular_price
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
             }

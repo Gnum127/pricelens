@@ -14,7 +14,7 @@ class UnitPriceCalculator {
             return UnitPrice(value.setScale(SCALE, RoundingMode.HALF_UP), unit)
         }
 
-        val price = parsed.price ?: return null
+        val price = effectivePrice(parsed.price, parsed.priceByCard) ?: return null
         val amount = parsed.packageAmount ?: return null
         val unit = parsed.packageUnit ?: return null
 

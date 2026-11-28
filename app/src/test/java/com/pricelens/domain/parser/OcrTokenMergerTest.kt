@@ -16,7 +16,9 @@ import java.math.BigDecimal
 
 /**
  * Сырые токены сняты с реальных кадров 1.jpg–7.jpg: координаты RapidOCR взяты из его boxPoint,
- * слова и копейки — из word-level вывода Tesseract rus. Фотографии в репозиторий не кладутся.
+ * слова и копейки — из word-level вывода Tesseract rus. Фикстуры 8.jpg–13.jpg фиксируют
+ * подтверждённые пользователем эталоны (две цены и шум соседнего ценника). Фотографии
+ * в репозиторий не кладутся.
  */
 class OcrTokenMergerTest {
     private val merger = OcrTokenMerger()
@@ -32,11 +34,21 @@ class OcrTokenMergerTest {
         case5(),
         case6(),
         case7(),
+        case8(),
+        case9(),
+        case10(),
+        case11(),
+        case12(),
+        case13(),
     ).map { case -> DynamicTest.dynamicTest(case.id) { assertRealTag(case) } }
 
     private fun assertRealTag(case: Case) {
         val text = merger.merge(case.frame)
         assertWithMessage("${case.id}: сводка пустая").that(text.isBlank()).isFalse()
+        if (case.id == "11.jpg") {
+            assertWithMessage("${case.id}: цена соседнего ценника не должна попасть в сводку: $text")
+                .that(text).doesNotContain("262")
+        }
 
         val parsed = parser.parse(text)
         assertWithMessage("${case.id}: парсер не разобрал «$text»").that(parsed).isNotNull()
@@ -46,6 +58,12 @@ class OcrTokenMergerTest {
             assertWithMessage("${case.id}: подпись веса").that(it.packageAmountLabel).isEqualTo(case.label)
             assertWithMessage("${case.id}: единица").that(it.packageUnit).isEqualTo(case.unit)
             assertDecimal("${case.id}: цена", it.price, case.price)
+            if (case.priceByCard == null) {
+                assertWithMessage("${case.id}: второй цены быть не должно")
+                    .that(it.priceByCard).isNull()
+            } else {
+                assertDecimal("${case.id}: цена по карте", it.priceByCard, case.priceByCard)
+            }
         }
 
         val unitPrice = calculator.calculate(parsed)
@@ -67,6 +85,7 @@ class OcrTokenMergerTest {
         val name: String,
         val amount: String,
         val price: String,
+        val priceByCard: String? = null,
         val unitPrice: String,
         val label: String? = null,
         val unit: WeightUnit = WeightUnit.GRAM,
@@ -262,6 +281,318 @@ class OcrTokenMergerTest {
         price = "49.99",
         unitPrice = "555.44",
     )
+
+    // 8.jpg — затяжное печенье «Имбирное», 190 г, 144 ₽.
+    private fun case8() = Case(
+        id = "8.jpg",
+        frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ЗАТЯЖНОЕ", 300, 250, 780, 290),
+                tess("\"ИМБИРНОЕ\"", 430, 288, 650, 325),
+                tess("190 г", 500, 325, 620, 352),
+                rapid("144", 470, 360, 700, 490),
+            ),
+        ),
+        name = "ПЕЧЕНЬЕ ЗАТЯЖНОЕ «ИМБИРНОЕ»",
+        amount = "190",
+        price = "144",
+        unitPrice = "757.89",
+    )
+
+    // 9.jpg — «Суперзлак», 230 г, 126 ₽.
+    private fun case9() = Case(
+        id = "9.jpg",
+        frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ", 300, 250, 780, 290),
+                tess("\"СУПЕРЗЛАК\"", 420, 288, 660, 325),
+                tess("230 г", 500, 325, 620, 352),
+                rapid("126", 470, 360, 700, 490),
+            ),
+        ),
+        name = "ПЕЧЕНЬЕ ОВСЯНОЕ «СУПЕРЗЛАК»",
+        amount = "230",
+        price = "126",
+        unitPrice = "547.83",
+    )
+
+    // 10.jpg — кавычки и регистр внутри названия сохраняются как на ценнике.
+    private fun case10() = Case(
+        id = "10.jpg",
+        frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ \"ОВСЯНОЕ С клюквой,", 250, 240, 800, 285),
+                tess("БРУСНИКОЙ И СЕМЕНАМИ ТЫКВЫ\"", 250, 282, 830, 325),
+                tess("200 г", 500, 325, 620, 352),
+                rapid("262", 470, 360, 700, 490),
+            ),
+        ),
+        name = "ПЕЧЕНЬЕ «ОВСЯНОЕ С клюквой, БРУСНИКОЙ И СЕМЕНАМИ ТЫКВЫ»",
+        amount = "200",
+        price = "262",
+        unitPrice = "1310.00",
+    )
+
+    // 11.jpg — цена 262 ₽ слева относится к соседнему ценнику, второй ценой не становится.
+    private fun case11() = Case(
+        id = "11.jpg",
+        frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ЗЕФИР ВАНИЛЬНЫЙ", 300, 250, 780, 300),
+                tess("80 г", 500, 325, 620, 352),
+                rapid("64", 500, 360, 680, 490),
+                rapid("262", 40, 360, 220, 490),
+            ),
+        ),
+        name = "ЗЕФИР ВАНИЛЬНЫЙ",
+        amount = "80",
+        price = "64",
+        unitPrice = "800.00",
+    )
+
+    // 12.jpg — сливовый зефир, 150 г, 155 ₽.
+    private fun case12() = Case(
+        id = "12.jpg",
+        frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ЗЕФИР СЛИВОВЫЙ", 350, 250, 730, 295),
+                tess("150 г", 500, 325, 620, 352),
+                rapid("155", 470, 360, 700, 490),
+            ),
+        ),
+        name = "ЗЕФИР СЛИВОВЫЙ",
+        amount = "150",
+        price = "155",
+        unitPrice = "1033.33",
+    )
+
+    // 13.jpg — две цены одного ценника: 270 ₽ и 243 ₽ по карте; сравнение идёт от 243 ₽.
+    private fun case13() = Case(
+        id = "13.jpg",
+        frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ", 260, 240, 820, 295),
+                tess("200 г", 500, 325, 620, 352),
+                tess("цена по карте до 29 ноября", 640, 480, 900, 510),
+                rapid("270", 430, 360, 650, 490),
+                rapid("243", 620, 360, 830, 490),
+            ),
+        ),
+        name = "ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ",
+        amount = "200",
+        price = "270",
+        priceByCard = "243",
+        unitPrice = "1215.00",
+    )
+
+    @Test
+    fun cardLabelDeterminesRoleEvenWhenItStandsNextToCentralPrice() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ", 260, 240, 820, 295),
+                tess("200 г", 500, 325, 620, 352),
+                tess("цена по карте", 480, 300, 620, 330),
+                rapid("270", 430, 360, 650, 490),
+                rapid("243", 660, 360, 880, 490),
+            ),
+        )
+
+        val parsed = parser.parse(merger.merge(frame))
+
+        assertThat(parsed).isNotNull()
+        assertWithMessage("подпись у 270 должна делать её ценой по карте: ${merger.merge(frame)}")
+            .that(parsed!!.name).isEqualTo("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ")
+        assertDecimal("обычная цена", parsed.price, "243")
+        assertDecimal("цена по карте", parsed.priceByCard, "270")
+        assertDecimal("цена за кг по меньшей цене", calculator.calculate(parsed)!!.value, "1215.00")
+    }
+
+    @Test
+    fun neighboringPriceBoxesWithoutOverlapAreStillMergedAsOneTag() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ", 260, 240, 820, 295),
+                tess("200 г", 500, 325, 620, 352),
+                tess("цена по карте", 700, 300, 840, 330),
+                rapid("270", 430, 360, 650, 490),
+                rapid("243", 660, 360, 880, 490),
+            ),
+        )
+
+        val parsed = parser.parse(merger.merge(frame))
+
+        assertThat(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270")
+        assertDecimal("цена по карте", parsed.priceByCard, "243")
+    }
+
+    @Test
+    fun twoPricesWithoutCardLabelDoNotProduceDiscount() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ", 300, 210, 800, 255),
+                tess("200 г", 500, 390, 620, 420),
+                rapid("270", 430, 300, 650, 380),
+                rapid("243", 620, 300, 840, 380),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("без подписи вторая цена не создаётся: $text").that(text).doesNotContain("по карте")
+        assertThat(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270")
+        assertThat(parsed.priceByCard).isNull()
+    }
+
+    @Test
+    fun cardLabelFromNeighboringTagDoesNotCreateDiscount() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ", 300, 210, 800, 255),
+                tess("200 г", 500, 390, 620, 420),
+                tess("цена по карте", 40, 300, 240, 330),
+                rapid("270", 430, 300, 650, 380),
+                rapid("262", 40, 300, 220, 380),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("подпись соседнего ценника не должна дать вторую цену: $text")
+            .that(text).doesNotContain("по карте")
+        assertThat(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270")
+        assertThat(parsed.priceByCard).isNull()
+    }
+
+    @Test
+    fun cardLabelOfThirdTagIsIgnoredEvenWithTwoPricesOnSelectedTag() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ С ЧЕРНОСЛИВОМ", 300, 210, 800, 255),
+                tess("200 г", 500, 390, 620, 420),
+                tess("цена по карте", 40, 300, 240, 330),
+                rapid("270", 430, 300, 650, 380),
+                rapid("243", 620, 300, 840, 380),
+                rapid("262", 40, 300, 220, 380),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("подпись третьего ценника не должна дать скидку: $text")
+            .that(text).doesNotContain("по карте")
+        assertWithMessage("цена третьего ценника не должна попасть в сводку: $text")
+            .that(text).doesNotContain("262")
+        assertThat(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270")
+        assertThat(parsed.priceByCard).isNull()
+    }
+
+    @Test
+    fun weightBelowPriceIsRecognizedWhenCardLabelIsPresent() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ", 300, 210, 800, 255),
+                tess("200 г", 500, 390, 620, 420),
+                tess("цена по карте", 600, 300, 800, 330),
+                rapid("270", 430, 300, 650, 380),
+                rapid("243", 620, 300, 840, 380),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("вес под ценой должен попасть в сводку: $text").that(text).contains("200 г")
+        assertThat(parsed).isNotNull()
+        assertThat(parsed!!.name).isEqualTo("ПЕЧЕНЬЕ ОВСЯНОЕ")
+        assertDecimal("вес", parsed.packageAmount, "200")
+        assertDecimal("цена по карте", parsed.priceByCard, "243")
+    }
+
+    @Test
+    fun nameAndWeightAreKeptWhenTheyStandCloserToCardPrice() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ", 700, 210, 900, 255),
+                tess("200 г", 700, 390, 820, 420),
+                tess("цена по карте", 820, 300, 940, 330),
+                rapid("270", 430, 300, 650, 380),
+                rapid("243", 620, 300, 840, 380),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertThat(parsed).isNotNull()
+        assertThat(parsed!!.name).isEqualTo("ПЕЧЕНЬЕ ОВСЯНОЕ")
+        assertDecimal("вес", parsed.packageAmount, "200")
+        assertDecimal("обычная цена", parsed.price, "270")
+        assertDecimal("цена по карте", parsed.priceByCard, "243")
+    }
+
+    @Test
+    fun cardPriceGetsItsOwnKopecksAndNoUnit() {
+        val frame = OcrFrame(
+            width = 1080,
+            height = 720,
+            tokens = listOf(
+                tess("ПЕЧЕНЬЕ ОВСЯНОЕ", 300, 210, 800, 255),
+                tess("200 г", 500, 390, 620, 420),
+                tess("99", 600, 340, 640, 380),
+                tess("50", 800, 340, 840, 380),
+                tess("цена по карте", 600, 300, 800, 330),
+                rapid("270", 430, 300, 650, 380),
+                rapid("243", 620, 300, 840, 380),
+                rapid("py6/wt", 520, 300, 620, 330),
+                rapid("py6/kr", 800, 300, 880, 330),
+            ),
+        )
+
+        val text = merger.merge(frame)
+        val parsed = parser.parse(text)
+
+        assertWithMessage("копейки обеих цен: $text").that(text).contains("270,99")
+        assertWithMessage("копейки цены по карте: $text").that(text).contains("243,50")
+        assertWithMessage(" unit соседней цены не должен попасть в карточную: $text")
+            .that(text).doesNotContain("243,50 ₽/кг")
+        assertThat(parsed).isNotNull()
+        assertDecimal("обычная цена", parsed!!.price, "270.99")
+        assertDecimal("цена по карте", parsed.priceByCard, "243.50")
+        assertDecimal("цена за кг по карте", calculator.calculate(parsed)!!.value, "1217.50")
+    }
 
     @Test
     fun kopecksFallbackToRapidOcrWhenTesseractMissesThem() {

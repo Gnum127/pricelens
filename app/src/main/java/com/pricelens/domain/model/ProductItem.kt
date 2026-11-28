@@ -9,6 +9,8 @@ data class ProductItem(
     val packageAmountLabel: String? = null,
     val packageUnit: WeightUnit?,
     val price: BigDecimal?,
+    val priceByCard: BigDecimal? = null,
     val unitPrice: UnitPrice,
+    val unitPriceSource: UnitPriceSource = UnitPriceSource.PACKAGE,
     val sourceText: String? = null,
 )

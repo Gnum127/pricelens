@@ -60,6 +60,7 @@ fun CompareScreen(
                     name = item.name,
                     amount = item.packageAmountLabel ?: item.packageAmount?.let(::formatAmount).orEmpty(),
                     price = item.price?.let(::formatMoney).orEmpty(),
+                    priceByCard = item.priceByCard?.let(::formatMoney).orEmpty(),
                 )
                 val difference = if (item.id != state.cheapestId && best != null) {
                     formatMoney(item.unitPrice.value - best.unitPrice.value)
@@ -71,11 +72,13 @@ fun CompareScreen(
                     nameValue = draft.name,
                     amountValue = draft.amount,
                     priceValue = draft.price,
+                    priceByCardValue = draft.priceByCard,
                     isBest = item.id == state.cheapestId,
                     difference = difference,
                     onNameChange = { onAction(UiAction.NameChanged(item.id, it)) },
                     onAmountChange = { onAction(UiAction.AmountChanged(item.id, it)) },
                     onPriceChange = { onAction(UiAction.PriceChanged(item.id, it)) },
+                    onPriceByCardChange = { onAction(UiAction.PriceByCardChanged(item.id, it)) },
                     onRemove = { onAction(UiAction.ItemRemoved(item.id)) },
                 )
             }

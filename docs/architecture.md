@@ -21,18 +21,21 @@
 - `model/`
   - `OcrFrame(width, height, tokens)` и `OcrToken(text, box, confidence, source)` — координаты
     токенов в пикселях кадра; `OcrBox` использует исключительные границы `right/bottom`, как `Rect`.
-  - `ProductItem(id, name, packageAmount?, packageAmountLabel?, packageUnit?, price?, unitPrice, sourceText?)`.
+  - `ProductItem(id, name, packageAmount?, packageAmountLabel?, packageUnit?, price?, priceByCard?, unitPrice, unitPriceSource, sourceText?)`.
     Поля количества и цены упаковки nullable только для ценника с явной строкой
     «цена за 1 кг/1 л»: такие поля пользователь заполняет вручную до сравнения.
     Для обычного ценника они не-null. `packageAmount` хранится как `BigDecimal`
     в базовых единицах (г или мл), `unit` — `GRAM | MILLILITER`. Цена — `BigDecimal` рублей.
     `packageAmountLabel` хранит подпись диапазона («230-240 г»); для расчёта берётся её верхняя граница.
+    `priceByCard` — вторая цена ценника («по карте»); обе цены редактируются, в сравнении участвует меньшая.
   - `UnitPrice(valuePerKgOrL: BigDecimal, displayUnit: KILOGRAM | LITER)`.
 - `parser/OcrTokenMerger` — чистая функция: по координатам и confidence выбирает крупные рубли
   RapidOCR, мелкие копейки/слова/вес Tesseract и собирает канонический текст ценника.
 - `parser/PriceTagParser` — из канонического текста возвращает `ParsedPriceTag?`:
   цена, количество, единица, опционально название. Никаких Android-типов.
-- `pricing/UnitPriceCalculator` — `price / (amount / 1000)`; защита от нуля и некорректных значений.
+- `pricing/PriceSelection` — выбор меньшей из двух цен упаковки, индикация цены по карте.
+  Явная цена за 1 кг/л имеет приоритет (`UnitPriceSource.EXPLICIT`) и не пересчитывается при правках полей.
+- `pricing/UnitPriceCalculator` — `effectivePrice / (amount / 1000)`; защита от нуля и некорректных значений.
 - `usecase/`
   - `RecognizePriceTagUseCase(imageProvider, merger, parser, calculator)` → OCR кадра → сводка токенов → парсер.
   - `AddItemUseCase`, `RemoveItemUseCase`, `CompareItemsUseCase` — работают с до 5 элементами.
@@ -46,8 +49,8 @@
 - `ocr/TesseractOcr` — кириллица, слова и копейки; `TessBaseAPI` с word-level boxes/confidence.
 - `ocr/RapidOcr` — крупные рубли; `OcrEngine.detect(Bitmap, output, maxSideLen)`, boxScore/charScores.
 - `ocr/TwoLayerTextRecognizer` — прогоняет оба движка по одному Bitmap и возвращает `OcrFrame`.
-- `local/db/` — Room: `AppDatabase` (v2), `ProductItemEntity`, `ComparisonSessionEntity`, DAO,
-  converters, `MIGRATION_1_2` (добавлен `packageAmountLabel`).
+- `local/db/` — Room: `AppDatabase` (v3), `ProductItemEntity`, `ComparisonSessionEntity`, DAO,
+  converters, `MIGRATION_1_2` (`packageAmountLabel`) и `MIGRATION_2_3` (`priceByCard`, `unitPriceSource`).
 - `local/datastore/` — `SettingsDataStore` (например, последняя выбранная единица).
 - `repository/PriceTagRepositoryImpl` — маппинг entity ↔ domain, доступ к текущей сессии.
 

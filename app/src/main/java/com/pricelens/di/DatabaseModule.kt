@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.pricelens.data.local.db.AppDatabase
 import com.pricelens.data.local.db.MIGRATION_1_2
+import com.pricelens.data.local.db.MIGRATION_2_3
 import com.pricelens.data.local.db.PriceTagDao
 import dagger.Module
 import dagger.Provides
@@ -19,7 +20,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "pricelens.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
 
     @Provides
