@@ -33,6 +33,8 @@ data class ProductItemEntity(
     val priceByCard: BigDecimal? = null,
     val unitPriceValue: BigDecimal,
     val unitPriceUnit: UnitPrice.Unit,
-    val unitPriceSource: UnitPriceSource = UnitPriceSource.PACKAGE,
+    // Nullable намеренно: MIGRATION_2_3 создаёт колонку без NOT NULL, а MIGRATION_3_4
+    // пересоздаёт таблицу под эту схему. Конвертер подставляет PACKAGE для null.
+    val unitPriceSource: UnitPriceSource? = UnitPriceSource.PACKAGE,
     val sourceText: String?,
 )

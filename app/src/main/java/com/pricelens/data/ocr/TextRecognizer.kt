@@ -1,8 +1,8 @@
 package com.pricelens.data.ocr
 
-import androidx.camera.core.ImageProxy
 import com.pricelens.domain.model.OcrFrame
+import java.io.File
 
 fun interface TextRecognizer {
-    fun recognize(image: ImageProxy): OcrFrame?
+    fun recognize(photo: File): OcrFrame?
 }

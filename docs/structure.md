@@ -23,23 +23,23 @@ pricelens/
 │       │   │   ├── PriceLensApp.kt            # @HiltAndroidApp
 │       │   │   ├── MainActivity.kt             # @AndroidEntryPoint, setContent
 │       │   │   ├── core/
-│       │   │   │   ├── design/                 # AppTheme, Color/Shape/Type, PriceCard, AddTile, UnitPriceBadge
+│       │   │   │   ├── design/                 # AppTheme, Color/Shape/Type, PriceCard, EntryActions, UnitPriceBadge
 │       │   │   │   └── util/                   # Result-алиасы, decimal formatters, Dispatchers
 │       │   │   ├── domain/
-│       │   │   │   ├── model/                  # ProductItem, ParsedPriceTag, UnitPrice, UnitPriceSource, OcrFrame/OcrToken/OcrBox
+│       │   │   │   ├── model/                  # ProductItem, ParsedPriceTag, ManualEntryInput, UnitPrice, UnitPriceSource, OcrFrame/OcrToken/OcrBox
 │       │   │   │   ├── parser/                 # OcrTokenMerger + PriceTagParser (чистый Kotlin)
 │       │   │   │   ├── pricing/                # UnitPriceCalculator, PriceSelection (меньшая из двух цен), сравнение
-│       │   │   │   ├── usecase/                # Recognize/Add/Remove/Compare use cases
+│       │   │   │   ├── usecase/                # Recognize/CreateManual/Add/Remove/Compare use cases
 │       │   │   │   └── repository/             # интерфейс PriceTagRepository
 │       │   │   ├── data/
-│       │   │   │   ├── camera/                 # CameraController (CameraX)
-│       │   │   │   ├── ocr/                    # TwoLayerTextRecognizer, TesseractOcr, RapidOcr, TextRecognizer
+│       │   │   │   ├── camera/                 # CameraController, CaptureCompletion, снимок в файл
+│       │   │   │   ├── ocr/                    # TwoLayerTextRecognizer, TesseractOcr, RapidOcr, TextRecognizer, OcrImageDecoder
 │       │   │   │   ├── local/
 │       │   │   │   │   ├── db/                 # AppDatabase, DAO, Entity, Converters, Migrations
 │       │   │   │   │   └── datastore/          # SettingsDataStore
 │       │   │   │   └── repository/             # PriceTagRepositoryImpl
 │       │   │   ├── ui/
-│       │   │   │   ├── compare/                # CompareScreen, CompareViewModel, CompareUiState
+│       │   │   │   ├── compare/                # CompareScreen, CompareViewModel, CompareUiState, ManualEntryDialog
 │       │   │   │   └── capture/                # CameraScreen / CameraBottomSheet
 │       │   │   └── di/                         # Hilt-модули
 │       │   └── res/

@@ -13,6 +13,7 @@ import com.pricelens.domain.repository.ImageTextProvider
 import com.pricelens.domain.repository.PriceTagRepository
 import com.pricelens.domain.usecase.AddItemUseCase
 import com.pricelens.domain.usecase.CompareItemsUseCase
+import com.pricelens.domain.usecase.CreateManualItemUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
 import com.pricelens.testing.singleLineFrame
@@ -69,6 +70,109 @@ class CompareViewModelTest {
         viewModel.onAction(UiAction.CaptureDismissed)
 
         assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+    }
+
+    @Test
+    fun manualEntryButtonOpensEmptyDialog() {
+        val viewModel = viewModel()
+
+        viewModel.onAction(UiAction.ManualEntryClicked)
+
+        assertThat(viewModel.uiState.value.manualEntry)
+            .isEqualTo(ManualEntryState(ItemDraft("", "", "", ""), recognitionFailed = false))
+        assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+    }
+
+    @Test
+    fun manualFieldsAreStoredInDialogState() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.NAME, "Молоко 1 л"))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.AMOUNT, "950 мл"))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE, "119"))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE_BY_CARD, "100"))
+
+        assertThat(viewModel.uiState.value.manualEntry?.draft).isEqualTo(
+            ItemDraft("Молоко 1 л", "950 мл", "119", "100"),
+        )
+    }
+
+    @Test
+    fun manualEntryAddsItemWithCalculatedPriceAndClosesDialog() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+        fillManualEntry(viewModel, name = "Творог", amount = "350 г", price = "240")
+
+        viewModel.onAction(UiAction.ManualEntrySubmitted)
+        advance()
+
+        val state = viewModel.uiState.value
+        assertThat(state.manualEntry).isNull()
+        assertThat(state.items).hasSize(1)
+        val item = state.items.single()
+        assertThat(item.name).isEqualTo("Творог")
+        assertThat(item.unitPrice.value.compareTo(BigDecimal("685.71"))).isEqualTo(0)
+        assertThat(state.cheapestId).isEqualTo(item.id)
+        assertThat(state.drafts[item.id]?.amount).isEqualTo("350")
+        assertThat(repository.items).isEqualTo(state.items)
+    }
+
+    @Test
+    fun manualEntryRejectsInvalidNumbersAndKeepsDialogOpen() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+        fillManualEntry(viewModel, name = "Творог", amount = "350 г", price = "abc")
+
+        val event = expectMessage(viewModel) { viewModel.onAction(UiAction.ManualEntrySubmitted) }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.InvalidInput))
+        assertThat(viewModel.uiState.value.manualEntry?.draft).isEqualTo(
+            ItemDraft("Творог", "350 г", "abc", ""),
+        )
+        assertThat(viewModel.uiState.value.items).isEmpty()
+    }
+
+    @Test
+    fun manualEntryDismissDoesNotAddItem() {
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+        fillManualEntry(viewModel, name = "Творог", amount = "350 г", price = "240")
+
+        viewModel.onAction(UiAction.ManualEntryDismissed)
+
+        assertThat(viewModel.uiState.value.manualEntry).isNull()
+        assertThat(viewModel.uiState.value.items).isEmpty()
+    }
+
+    @Test
+    fun manualEntryAtLimitIsRejected() {
+        repository.items = (1..5).map { product("item$it", "Товар $it", "350", "240", "685.71") }
+        val viewModel = viewModel()
+
+        val event = expectMessage(viewModel) { viewModel.onAction(UiAction.ManualEntryClicked) }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.LimitReached))
+        assertThat(viewModel.uiState.value.manualEntry).isNull()
+        assertThat(viewModel.uiState.value.items).hasSize(5)
+    }
+
+    @Test
+    fun manualEntrySubmitRechecksLimitAfterAnotherCapture() {
+        repository.items = (1..4).map { product("item$it", "Товар $it", "350", "240", "685.71") }
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.ManualEntryClicked)
+        fillManualEntry(viewModel, name = "Пятый", amount = "350 г", price = "240")
+        viewModel.onAction(UiAction.CaptureConfirmed)
+        advance()
+        assertThat(viewModel.uiState.value.items).hasSize(5)
+
+        val event = expectMessage(viewModel) { viewModel.onAction(UiAction.ManualEntrySubmitted) }
+
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.LimitReached))
+        assertThat(viewModel.uiState.value.items).hasSize(5)
+        assertThat(viewModel.uiState.value.manualEntry?.draft)
+            .isEqualTo(ItemDraft("Пятый", "350 г", "240", ""))
     }
 
     @Test
@@ -137,27 +241,59 @@ class CompareViewModelTest {
     }
 
     @Test
-    fun emptyTextEmitsExactlyOneMessageAndAddsNothing() {
+    fun emptyTextOpensManualEntryAndAddsNothing() {
         provider.result = RawTextResult.EmptyText
         val viewModel = viewModel()
 
         val messages = messagesDuring(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
 
-        assertThat(messages).containsExactly(UiEvent.Message(CompareMessage.EmptyText))
+        assertThat(messages).isEmpty()
         assertThat(viewModel.uiState.value.items).isEmpty()
         assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
+        assertThat(viewModel.uiState.value.manualEntry?.recognitionFailed).isTrue()
     }
 
     @Test
-    fun unparseableTextEmitsMessageWithRawText() {
+    fun unparseableTextOpensManualEntryWithoutSnackbar() {
         provider.result = textResult("непонятный ценник")
         val viewModel = viewModel()
 
+        val messages = messagesDuring(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
+
+        assertThat(messages).isEmpty()
+        assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
+        assertThat(viewModel.uiState.value.manualEntry?.recognitionFailed).isTrue()
+        assertThat(viewModel.uiState.value.manualEntry?.draft).isEqualTo(ItemDraft("", "", "", ""))
+    }
+
+    @Test
+    fun failedRecognitionAtItemLimitDoesNotOpenManualEntry() {
+        repository.items = (1..5).map { product("item$it", "Товар $it", "350", "240", "685.71") }
+        provider.result = RawTextResult.EmptyText
+        val viewModel = viewModel()
+
+        val messages = messagesDuring(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
+
+        assertThat(messages).isEmpty()
+        assertThat(viewModel.uiState.value.manualEntry).isNull()
+        assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
+        assertThat(viewModel.uiState.value.items).hasSize(5)
+    }
+
+    @Test
+    fun unexpectedCaptureFailureClosesCaptureAndReportsCameraError() {
+        provider.failure = IllegalStateException("camera exploded")
+        val viewModel = viewModel()
+        viewModel.onAction(UiAction.AddClicked)
+
         val event = expectMessage(viewModel) { viewModel.onAction(UiAction.CaptureConfirmed) }
 
-        assertThat(event).isEqualTo(
-            UiEvent.Message(CompareMessage.Unparseable("непонятный ценник")),
-        )
+        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.CameraError))
+        assertThat(viewModel.uiState.value.isCaptureOpen).isFalse()
+        assertThat(viewModel.uiState.value.isBusy).isFalse()
     }
 
     @Test
@@ -826,7 +962,6 @@ class CompareViewModelTest {
 
         val state = viewModel.uiState.value
         assertThat(state.isLoading).isFalse()
-        assertThat(state.isPersistenceAvailable).isTrue()
         assertThat(state.items).isEqualTo(repository.items)
         assertThat(state.cheapestId).isEqualTo("b")
         assertThat(state.drafts["a"]?.amount).isEqualTo("350")
@@ -863,14 +998,14 @@ class CompareViewModelTest {
     }
 
     @Test
-    fun loadFailureIsReportedAndSelectionStartsEmpty() {
+    fun loadFailureIsSilentAndSelectionStartsEmpty() {
         repository.loadError = IllegalStateException("load failed")
         val viewModel = viewModel(completeLoad = false)
 
-        val event = expectMessage(viewModel) { advance() }
+        val messages = messagesDuring(viewModel) { advance() }
 
-        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.StorageError))
-        assertThat(viewModel.uiState.value.isPersistenceAvailable).isFalse()
+        assertThat(messages).isEmpty()
+        assertThat(viewModel.uiState.value.isLoading).isFalse()
         assertThat(viewModel.uiState.value.items).isEmpty()
     }
 
@@ -881,11 +1016,13 @@ class CompareViewModelTest {
         repository.loadError = IllegalStateException("load failed")
         val viewModel = viewModel(completeLoad = false)
 
-        val event = expectMessage(viewModel) { advance() }
-        viewModel.onAction(UiAction.CaptureConfirmed)
-        advance()
+        val messages = messagesDuring(viewModel) {
+            advance()
+            viewModel.onAction(UiAction.CaptureConfirmed)
+            advance()
+        }
 
-        assertThat(event).isEqualTo(UiEvent.Message(CompareMessage.StorageError))
+        assertThat(messages).isEmpty()
         assertThat(viewModel.uiState.value.items).hasSize(1)
         assertThat(repository.items).isEqualTo(saved)
         assertThat(repository.saveCalls).isEqualTo(0)
@@ -982,6 +1119,22 @@ class CompareViewModelTest {
         assertThat(after.drafts).isEqualTo(before.drafts)
     }
 
+    @Test
+    fun manuallyAddedItemSurvivesRestart() {
+        val first = viewModel()
+        first.onAction(UiAction.ManualEntryClicked)
+        fillManualEntry(first, name = "Творог", amount = "350 г", price = "240")
+        first.onAction(UiAction.ManualEntrySubmitted)
+        advance()
+        val before = first.uiState.value
+
+        val second = viewModel()
+
+        assertThat(second.uiState.value.items).isEqualTo(before.items)
+        assertThat(second.uiState.value.drafts).isEqualTo(before.drafts)
+        assertThat(second.uiState.value.cheapestId).isEqualTo(before.cheapestId)
+    }
+
     private fun textResult(text: String): RawTextResult = RawTextResult.Success(singleLineFrame(text))
 
     private fun addItem(viewModel: CompareViewModel, text: String): ProductItem {
@@ -989,6 +1142,19 @@ class CompareViewModelTest {
         viewModel.onAction(UiAction.CaptureConfirmed)
         advance()
         return viewModel.uiState.value.items.last()
+    }
+
+    private fun fillManualEntry(
+        viewModel: CompareViewModel,
+        name: String,
+        amount: String,
+        price: String,
+        priceByCard: String = "",
+    ) {
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.NAME, name))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.AMOUNT, amount))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE, price))
+        viewModel.onAction(UiAction.ManualFieldChanged(ManualField.PRICE_BY_CARD, priceByCard))
     }
 
     private fun advance() {
@@ -1030,17 +1196,19 @@ class CompareViewModelTest {
         imageTextProvider: ImageTextProvider = provider,
     ): CompareViewModel {
         val calculator = UnitPriceCalculator()
+        val parser = PriceTagParser()
         return CompareViewModel(
             recognizePriceTag = RecognizePriceTagUseCase(
                 imageTextProvider = imageTextProvider,
                 merger = OcrTokenMerger(),
-                parser = PriceTagParser(),
+                parser = parser,
                 calculator = calculator,
             ),
             addItem = AddItemUseCase(),
             removeItemUseCase = RemoveItemUseCase(),
             compareItems = CompareItemsUseCase(),
             calculator = calculator,
+            createManualItem = CreateManualItemUseCase(parser, calculator),
             repository = repository,
         ).also { if (completeLoad) advance() }
     }
@@ -1114,10 +1282,12 @@ class CompareViewModelTest {
 
     private class FakeImageTextProvider : ImageTextProvider {
         var result: RawTextResult = RawTextResult.Success(singleLineFrame("350 г 240 ₽"))
+        var failure: Throwable? = null
         var readCalls: Int = 0
 
         override suspend fun readText(): RawTextResult {
             readCalls++
+            failure?.let { throw it }
             return result
         }
     }

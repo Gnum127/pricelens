@@ -38,28 +38,35 @@
 - `pricing/UnitPriceCalculator` — `effectivePrice / (amount / 1000)`; защита от нуля и некорректных значений.
 - `usecase/`
   - `RecognizePriceTagUseCase(imageProvider, merger, parser, calculator)` → OCR кадра → сводка токенов → парсер.
+  - `CreateManualItemUseCase` — ручной ввод проходит через тот же парсер и calculator, что и распознанный ценник.
   - `AddItemUseCase`, `RemoveItemUseCase`, `CompareItemsUseCase` — работают с до 5 элементами.
 - `repository/PriceTagRepository` — интерфейс: сохранить/загрузить текущую выборку.
 
 ### data
 
-- `camera/CameraController` — обёртка над CameraX: `bindToLifecycle`, `takePicture`;
-  `OcrImageDecoder` декодирует JPEG-кадр в `Bitmap`, `CameraImageTextProvider` обязательно
-  закрывает `ImageProxy`.
+- `camera/CameraController` — обёртка над CameraX: `bindToLifecycle`, `captureToFile`.
+  Один снимок сохраняется в приватный файл `cacheDir`, после чего камера освобождается;
+  `OcrImageDecoder` декодирует JPEG в `Bitmap` с учётом EXIF, `CameraImageTextProvider`
+  удаляет временный файл в `finally`.
 - `ocr/TesseractOcr` — кириллица, слова и копейки; `TessBaseAPI` с word-level boxes/confidence.
 - `ocr/RapidOcr` — крупные рубли; `OcrEngine.detect(Bitmap, output, maxSideLen)`, boxScore/charScores.
 - `ocr/TwoLayerTextRecognizer` — прогоняет оба движка по одному Bitmap и возвращает `OcrFrame`.
-- `local/db/` — Room: `AppDatabase` (v3), `ProductItemEntity`, `ComparisonSessionEntity`, DAO,
-  converters, `MIGRATION_1_2` (`packageAmountLabel`) и `MIGRATION_2_3` (`priceByCard`, `unitPriceSource`).
+- `local/db/` — Room: `AppDatabase` (v4), `ProductItemEntity`, `ComparisonSessionEntity`, DAO,
+  converters, `MIGRATION_1_2` (`packageAmountLabel`), `MIGRATION_2_3` (`priceByCard`, `unitPriceSource`)
+  и `MIGRATION_3_4` (пересоздание таблицы под nullable-колонку).
+  `unitPriceSource` в entity nullable; `MIGRATION_3_4` приводит к этой схеме оба варианта v3
+  (с `NOT NULL` и без него), конвертер подставляет `PACKAGE` для старых и повреждённых значений.
 - `local/datastore/` — `SettingsDataStore` (например, последняя выбранная единица).
 - `repository/PriceTagRepositoryImpl` — маппинг entity ↔ domain, доступ к текущей сессии.
 
 ### ui
 
-- `compare/CompareScreen` — Compose: сетка карточек (до 5), кнопка «Добавить ценник», итоговая панель.
+- `compare/CompareScreen` — Compose: сетка карточек (до 5), две кнопки добавления (сканирование и ручной ввод),
+  итоговая панель без заголовка, диалог ручного ввода при неудачном распознавании.
 - `compare/CompareViewModel` — state + события; лимит в 5 элементов проверяется и здесь, и в use case.
-- `capture/CameraScreen` (или bottom sheet) — предпросмотр камеры, рамка наведения, кнопка съёмки.
-- `core/design/` — `AppTheme`, `Color`, `Shape`, `Type`, переиспользуемые `PriceCard`, `AddTile`, `UnitPriceBadge`.
+  Ошибка загрузки БД на старте не показывает snackbar и не перезаписывает сохранённые товары.
+- `capture/CapturePanel` — предпросмотр камеры, рамка наведения, кнопка съёмки.
+- `core/design/` — `AppTheme`, `Color`, `Shape`, `Type`, переиспользуемые `PriceCard`, `EntryActions`, `UnitPriceBadge`.
 
 ### di
 
@@ -68,7 +75,7 @@
 ## Поток данных (добавление ценника)
 
 ```
-Камера (ImageProxy)
+Камера → временный JPEG в cacheDir (файл удаляется после OCR)
    → OcrImageDecoder (Bitmap)
    → TesseractOcr + RapidOcr (токены с координатами)
    → OcrTokenMerger (канонический текст)

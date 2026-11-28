@@ -6,6 +6,7 @@ import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.ImageTextProvider
 import com.pricelens.domain.usecase.AddItemUseCase
 import com.pricelens.domain.usecase.CompareItemsUseCase
+import com.pricelens.domain.usecase.CreateManualItemUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
 import dagger.Module
@@ -49,4 +50,11 @@ object UseCaseModule {
     @Provides
     @Singleton
     fun provideCompareItems(): CompareItemsUseCase = CompareItemsUseCase()
+
+    @Provides
+    @Singleton
+    fun provideCreateManualItem(
+        parser: PriceTagParser,
+        calculator: UnitPriceCalculator,
+    ): CreateManualItemUseCase = CreateManualItemUseCase(parser, calculator)
 }

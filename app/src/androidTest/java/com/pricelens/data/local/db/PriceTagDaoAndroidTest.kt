@@ -129,7 +129,7 @@ class PriceTagDaoAndroidTest {
             createVersionOneDatabase(context, dbName)
             val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                 .allowMainThreadQueries()
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
             try {
                 val legacy = migrated.priceTagDao().getItems(CURRENT_SESSION_ID).single()
@@ -211,7 +211,7 @@ class PriceTagDaoAndroidTest {
             createVersionTwoDatabase(context, dbName)
             val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                 .allowMainThreadQueries()
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
             try {
                 val legacy = migrated.priceTagDao().getItems(CURRENT_SESSION_ID).single()
@@ -267,6 +267,122 @@ class PriceTagDaoAndroidTest {
                     "VALUES ('legacy', 'current', 0, 'Творог', '350', '230-240 г', 'GRAM', " +
                     "'240.00', '685.71', 'KILOGRAM', '350 г 240 ₽')",
             )
+        }
+        helper.close()
+    }
+
+    @Test
+    fun migrationFromVersionThreeWithNotNullSourceKeepsRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "pricelens-migration-v3-not-null-${UUID.randomUUID()}"
+        context.deleteDatabase(dbName)
+        try {
+            createVersionThreeDatabase(context, dbName, sourceNotNull = true)
+            val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+                .allowMainThreadQueries()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .build()
+            try {
+                val legacy = migrated.priceTagDao().getItems(CURRENT_SESSION_ID)
+                    .first { it.id == "legacy" }
+                assertEquals(UnitPriceSource.EXPLICIT, legacy.unitPriceSource)
+                assertEquals(BigDecimal("243.00"), legacy.priceByCard)
+                assertEquals("230-240 г", legacy.packageAmountLabel)
+
+                migrated.priceTagDao().upsertItems(
+                    listOf(entity(id = "new", position = 2)),
+                )
+                assertEquals(3, migrated.priceTagDao().getItems(CURRENT_SESSION_ID).size)
+            } finally {
+                migrated.close()
+            }
+        } finally {
+            context.deleteDatabase(dbName)
+        }
+    }
+
+    @Test
+    fun migrationFromVersionThreeWithNullableSourceNormalizesValues() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "pricelens-migration-v3-nullable-${UUID.randomUUID()}"
+        context.deleteDatabase(dbName)
+        try {
+            createVersionThreeDatabase(context, dbName, sourceNotNull = false)
+            val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+                .allowMainThreadQueries()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .build()
+            try {
+                val items = migrated.priceTagDao().getItems(CURRENT_SESSION_ID)
+                assertEquals(3, items.size)
+                assertEquals(UnitPriceSource.PACKAGE, items.first { it.id == "legacy" }.unitPriceSource)
+                assertEquals(UnitPriceSource.EXPLICIT, items.first { it.id == "second" }.unitPriceSource)
+                assertEquals(UnitPriceSource.PACKAGE, items.first { it.id == "bogus" }.unitPriceSource)
+            } finally {
+                migrated.close()
+            }
+        } finally {
+            context.deleteDatabase(dbName)
+        }
+    }
+
+    private fun createVersionThreeDatabase(
+        context: Context,
+        name: String,
+        sourceNotNull: Boolean,
+    ) {
+        val sourceColumn = if (sourceNotNull) {
+            "unitPriceSource TEXT NOT NULL"
+        } else {
+            "unitPriceSource TEXT"
+        }
+        val helper = object : SQLiteOpenHelper(context, name, null, 3) {
+            override fun onCreate(db: SQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE comparison_session (id TEXT NOT NULL, createdAt INTEGER NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, PRIMARY KEY(id))",
+                )
+                db.execSQL(
+                    "CREATE TABLE product_item (id TEXT NOT NULL, sessionId TEXT NOT NULL, " +
+                        "position INTEGER NOT NULL, name TEXT NOT NULL, packageAmount TEXT, " +
+                        "packageAmountLabel TEXT, packageUnit TEXT, price TEXT, priceByCard TEXT, " +
+                        "unitPriceValue TEXT NOT NULL, unitPriceUnit TEXT NOT NULL, $sourceColumn, " +
+                        "sourceText TEXT, PRIMARY KEY(id), " +
+                        "FOREIGN KEY(sessionId) REFERENCES comparison_session(id) ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX index_product_item_sessionId ON product_item (sessionId)")
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        helper.writableDatabase.use { db ->
+            db.execSQL(
+                "INSERT INTO comparison_session (id, createdAt, updatedAt) VALUES ('current', 100, 100)",
+            )
+            val legacySource = if (sourceNotNull) "'EXPLICIT'" else "NULL"
+            db.execSQL(
+                "INSERT INTO product_item (id, sessionId, position, name, packageAmount, " +
+                    "packageAmountLabel, packageUnit, price, priceByCard, unitPriceValue, " +
+                    "unitPriceUnit, unitPriceSource, sourceText) " +
+                    "VALUES ('legacy', 'current', 0, 'Творог', '350', '230-240 г', 'GRAM', " +
+                    "'240.00', '243.00', '685.71', 'KILOGRAM', $legacySource, '350 г 240 ₽')",
+            )
+            db.execSQL(
+                "INSERT INTO product_item (id, sessionId, position, name, packageAmount, " +
+                    "packageAmountLabel, packageUnit, price, priceByCard, unitPriceValue, " +
+                    "unitPriceUnit, unitPriceSource, sourceText) " +
+                    "VALUES ('second', 'current', 1, 'Кефир', '900', NULL, 'MILLILITER', " +
+                    "'100.00', NULL, '111.11', 'LITER', 'EXPLICIT', NULL)",
+            )
+            if (!sourceNotNull) {
+                db.execSQL(
+                    "INSERT INTO product_item (id, sessionId, position, name, packageAmount, " +
+                        "packageAmountLabel, packageUnit, price, priceByCard, unitPriceValue, " +
+                        "unitPriceUnit, unitPriceSource, sourceText) " +
+                        "VALUES ('bogus', 'current', 2, 'Бит', '350', NULL, 'GRAM', " +
+                        "'240.00', NULL, '685.71', 'KILOGRAM', 'BOGUS', NULL)",
+                )
+            }
         }
         helper.close()
     }

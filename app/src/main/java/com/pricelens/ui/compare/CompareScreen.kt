@@ -17,8 +17,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.pricelens.R
-import com.pricelens.core.design.AddTile
 import com.pricelens.core.design.ComparisonSummary
+import com.pricelens.core.design.EntryActions
 import com.pricelens.core.design.PriceCard
 import com.pricelens.core.util.formatAmount
 import com.pricelens.core.util.formatMoney
@@ -92,20 +92,13 @@ fun CompareScreen(
                 }
             }
             item {
-                AddTile(
-                    enabled = !state.isLoading &&
-                        state.items.size < AddItemUseCase.MAX_ITEMS && !state.isBusy,
-                    onClick = { onAction(UiAction.AddClicked) },
+                val canAdd = !state.isLoading &&
+                    state.items.size < AddItemUseCase.MAX_ITEMS && !state.isBusy
+                EntryActions(
+                    enabled = canAdd,
+                    onScan = { onAction(UiAction.AddClicked) },
+                    onManual = { onAction(UiAction.ManualEntryClicked) },
                 )
-            }
-            if (!state.isLoading && !state.isPersistenceAvailable) {
-                item {
-                    Text(
-                        text = stringResource(R.string.error_storage),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
             }
             if (!state.isLoading) {
                 item {
@@ -113,6 +106,15 @@ fun CompareScreen(
                 }
             }
         }
+    }
+
+    state.manualEntry?.let { entry ->
+        ManualEntryDialog(
+            state = entry,
+            onFieldChange = { field, value -> onAction(UiAction.ManualFieldChanged(field, value)) },
+            onSave = { onAction(UiAction.ManualEntrySubmitted) },
+            onDismiss = { onAction(UiAction.ManualEntryDismissed) },
+        )
     }
 
     if (state.isCaptureOpen) {

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pricelens.core.util.formatAmount
 import com.pricelens.core.util.formatMoney
+import com.pricelens.domain.model.ManualEntryInput
 import com.pricelens.domain.model.OcrResult
 import com.pricelens.domain.model.ParsedPriceTag
 import com.pricelens.domain.model.ProductItem
@@ -14,6 +15,7 @@ import com.pricelens.domain.pricing.UnitPriceCalculator
 import com.pricelens.domain.repository.PriceTagRepository
 import com.pricelens.domain.usecase.AddItemUseCase
 import com.pricelens.domain.usecase.CompareItemsUseCase
+import com.pricelens.domain.usecase.CreateManualItemUseCase
 import com.pricelens.domain.usecase.RecognizePriceTagUseCase
 import com.pricelens.domain.usecase.RemoveItemUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,6 +43,7 @@ class CompareViewModel @Inject constructor(
     private val removeItemUseCase: RemoveItemUseCase,
     private val compareItems: CompareItemsUseCase,
     private val calculator: UnitPriceCalculator,
+    private val createManualItem: CreateManualItemUseCase,
     private val repository: PriceTagRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(CompareUiState())
@@ -61,8 +64,8 @@ class CompareViewModel @Inject constructor(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                send(CompareMessage.StorageError)
-                _uiState.update { it.copy(isPersistenceAvailable = false) }
+                // Сообщение на старте мешает: данные просто начинаются с пустого списка,
+                // а запись отключается, чтобы не затереть сохранённые товары.
                 emptyList()
             }
             _uiState.update { state ->
@@ -102,6 +105,13 @@ class CompareViewModel @Inject constructor(
             UiAction.AddClicked -> _uiState.update {
                 it.copy(isCaptureOpen = true, isPermissionDenied = false)
             }
+            UiAction.ManualEntryClicked -> openManualEntry(recognitionFailed = false)
+            is UiAction.ManualFieldChanged -> _uiState.update { state ->
+                val entry = state.manualEntry ?: return@update state
+                state.copy(manualEntry = entry.copy(draft = entry.draft.with(action.field, action.value)))
+            }
+            UiAction.ManualEntrySubmitted -> submitManualEntry()
+            UiAction.ManualEntryDismissed -> _uiState.update { it.copy(manualEntry = null) }
             UiAction.CaptureDismissed -> _uiState.update {
                 it.copy(isCaptureOpen = false, isPermissionDenied = false)
             }
@@ -149,14 +159,16 @@ class CompareViewModel @Inject constructor(
                         }
                     }
 
-                    OcrResult.EmptyText -> failCapture(CompareMessage.EmptyText)
-                    is OcrResult.Unparseable -> {
-                        failCapture(CompareMessage.Unparseable(result.rawText))
-                    }
+                    OcrResult.EmptyText -> failCapture(null, offerManualEntry = true)
+                    is OcrResult.Unparseable -> failCapture(null, offerManualEntry = true)
                     OcrResult.CameraError -> failCapture(CompareMessage.CameraError)
                     OcrResult.OcrEngineError -> failCapture(CompareMessage.OcrEngineError)
                     OcrResult.PermissionDenied -> failCapture(CompareMessage.PermissionDenied)
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                failCapture(CompareMessage.CameraError)
             } finally {
                 // Отменённый захват не сбрасывает isBusy у нового захвата.
                 if (isActive) _uiState.update { it.copy(isBusy = false) }
@@ -165,9 +177,57 @@ class CompareViewModel @Inject constructor(
         captureJob = job
     }
 
-    private fun failCapture(message: CompareMessage) {
-        send(message)
-        _uiState.update { it.copy(isCaptureOpen = false, isBusy = false) }
+    private fun failCapture(message: CompareMessage?, offerManualEntry: Boolean = false) {
+        message?.let(::send)
+        _uiState.update { state ->
+            state.copy(
+                isCaptureOpen = false,
+                isBusy = false,
+                manualEntry = if (offerManualEntry && state.items.size < AddItemUseCase.MAX_ITEMS) {
+                    ManualEntryState(recognitionFailed = true)
+                } else {
+                    state.manualEntry
+                },
+            )
+        }
+    }
+
+    private fun openManualEntry(recognitionFailed: Boolean) {
+        if (_uiState.value.items.size >= AddItemUseCase.MAX_ITEMS) {
+            send(CompareMessage.LimitReached)
+            return
+        }
+        _uiState.update { it.copy(manualEntry = ManualEntryState(recognitionFailed = recognitionFailed)) }
+    }
+
+    private fun submitManualEntry() {
+        val state = _uiState.value
+        val draft = state.manualEntry?.draft ?: return
+        val item = createManualItem(UUID.randomUUID().toString(), draft.toInput())
+        if (item == null) {
+            send(CompareMessage.InvalidInput)
+            return
+        }
+        val updated = addItem(state.items, item)
+        if (updated == null) {
+            send(CompareMessage.LimitReached)
+            return
+        }
+        _uiState.update { current ->
+            current.copy(
+                items = updated,
+                drafts = current.drafts + (
+                    item.id to ItemDraft(
+                        name = item.name,
+                        amount = item.packageAmountLabel ?: item.packageAmount?.let(::formatAmount).orEmpty(),
+                        price = item.price?.let(::formatMoney).orEmpty(),
+                        priceByCard = item.priceByCard?.let(::formatMoney).orEmpty(),
+                    )
+                    ),
+                cheapestId = compareItems(updated).cheapestId,
+                manualEntry = null,
+            )
+        }
     }
 
     private fun changeName(id: String, value: String) {
@@ -342,4 +402,13 @@ class CompareViewModel @Inject constructor(
 
     private fun Map<String, ItemDraft>.with(id: String, transform: (ItemDraft) -> ItemDraft) =
         this + (id to transform(this[id] ?: ItemDraft("", "", "", "")))
+
+    private fun ItemDraft.with(field: ManualField, value: String) = when (field) {
+        ManualField.NAME -> copy(name = value)
+        ManualField.AMOUNT -> copy(amount = value)
+        ManualField.PRICE -> copy(price = value)
+        ManualField.PRICE_BY_CARD -> copy(priceByCard = value)
+    }
+
+    private fun ItemDraft.toInput() = ManualEntryInput(name, amount, price, priceByCard)
 }

@@ -31,8 +31,10 @@ object CameraModule {
     @Provides
     @Singleton
     fun provideImageTextProvider(
+        @ApplicationContext context: Context,
         cameraController: CameraController,
         textRecognizer: TextRecognizer,
         permissionChecker: CameraPermissionChecker,
-    ): ImageTextProvider = CameraImageTextProvider(cameraController, textRecognizer, permissionChecker)
+    ): ImageTextProvider =
+        CameraImageTextProvider(context.cacheDir, cameraController, textRecognizer, permissionChecker)
 }
